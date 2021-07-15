@@ -1,15 +1,37 @@
-import { Container } from '@pixi/display';
 import { ObservablePoint, Point } from '@pixi/math';
 import { settings } from '@pixi/settings';
-import { Sprite } from '@pixi/sprite';
-import { removeItems, deprecation } from '@pixi/utils';
+import { Mesh, MeshGeometry, MeshMaterial } from '@pixi/mesh';
+import { removeItems } from '@pixi/utils';
 import { BitmapFont } from './BitmapFont';
 
-import type { Dict } from '@pixi/utils';
 import type { Rectangle } from '@pixi/math';
-import type { Texture } from '@pixi/core';
-import type { IBitmapTextStyle, BitmapTextAlign, IBitmapTextFontDescriptor } from './BitmapTextStyle';
-import type { BitmapFontData } from './BitmapFontData';
+import { Texture } from '@pixi/core';
+import type { IBitmapTextStyle } from './BitmapTextStyle';
+import type { TextStyleAlign } from '@pixi/text';
+import { Container } from '@pixi/display';
+import type { IDestroyOptions } from '@pixi/display';
+
+interface PageMeshData {
+    index: number;
+    indexCount: number;
+    vertexCount: number;
+    uvsCount: number;
+    total: number;
+    mesh: Mesh;
+    vertices?: Float32Array;
+    uvs?: Float32Array;
+    indices?: Uint16Array;
+}
+interface CharRenderData {
+    texture: Texture;
+    line: number;
+    charCode: number;
+    position: Point;
+    prevSpaces: number;
+}
+
+const pageMeshDataPool: PageMeshData[] = [];
+const charRenderDataPool: CharRenderData[] = [];
 
 /**
  * A BitmapText object will create a line or multiple lines of text using bitmap font.
@@ -17,12 +39,11 @@ import type { BitmapFontData } from './BitmapFontData';
  * The primary advantage of this class over Text is that all of your textures are pre-generated and loading,
  * meaning that rendering is fast, and changing text has no performance implications.
  *
- * The primary disadvantage is that you need to preload the bitmap font assets, and thus the styling is set in stone.
  * Supporting character sets other than latin, such as CJK languages, may be impractical due to the number of characters.
  *
  * To split a line you can use '\n', '\r' or '\r\n' in your string.
  *
- * You can generate the fnt files using
+ * PixiJS can auto-generate fonts on-the-fly using BitmapFont or use fnt files provided by:
  * http://www.angelcode.com/products/bmfont/ for Windows or
  * http://www.bmglyph.com/ for Mac.
  *
@@ -30,7 +51,11 @@ import type { BitmapFontData } from './BitmapFontData';
  *
  * ```js
  * // in this case the font is in a file called 'desyrel.fnt'
- * let bitmapText = new PIXI.BitmapText("text using a fancy font!", {font: "35px Desyrel", align: "right"});
+ * let bitmapText = new PIXI.BitmapText("text using a fancy font!", {
+ *   fontName: "Desyrel",
+ *   fontSize: 35,
+ *   align: "right"
+ * });
  * ```
  *
  * @class
@@ -39,37 +64,60 @@ import type { BitmapFontData } from './BitmapFontData';
  */
 export class BitmapText extends Container
 {
-    public roundPixels: boolean;
+    public static styleDefaults: Partial<IBitmapTextStyle> = {
+        align: 'left',
+        tint: 0xFFFFFF,
+        maxWidth: 0,
+        letterSpacing: 0,
+    };
     public dirty: boolean;
     protected _textWidth: number;
     protected _textHeight: number;
-    protected _glyphs: Sprite[];
     protected _text: string;
     protected _maxWidth: number;
     protected _maxLineHeight: number;
     protected _letterSpacing: number;
     protected _anchor: ObservablePoint;
-    protected _font: {
-        name: string;
-        size: number;
-        tint: number;
-        align: BitmapTextAlign;
-    };
+    protected _fontName: string;
+    protected _fontSize: number;
+    protected _align: TextStyleAlign;
+    protected _activePagesMeshData: PageMeshData[];
+    protected _tint = 0xFFFFFF;
+    protected _roundPixels: boolean;
+    private _textureCache: Record<number, Texture>;
 
     /**
      * @param {string} text - A string that you would like the text to display.
      * @param {object} style - The style parameters.
-     * @param {string|object} style.font - The font descriptor for the object, can be passed as a string of form
-     *      "24px FontName" or "FontName" or as an object with explicit name/size properties.
-     * @param {string} [style.font.name] - The bitmap font id.
-     * @param {number} [style.font.size] - The size of the font in pixels, e.g. 24
-     * @param {string} [style.align='left'] - Alignment for multiline text ('left', 'center' or 'right'), does not affect
-     *      single line text.
+     * @param {string} style.fontName - The installed BitmapFont name.
+     * @param {number} [style.fontSize] - The size of the font in pixels, e.g. 24. If undefined,
+     *.     this will default to the BitmapFont size.
+     * @param {string} [style.align='left'] - Alignment for multiline text ('left', 'center', 'right' or 'justify'),
+     *      does not affect single line text.
      * @param {number} [style.tint=0xFFFFFF] - The tint color.
+     * @param {number} [style.letterSpacing=0] - The amount of spacing between letters.
+     * @param {number} [style.maxWidth=0] - The max width of the text before line wrapping.
      */
     constructor(text: string, style: Partial<IBitmapTextStyle> = {})
     {
         super();
+
+        // Apply the defaults
+        const { align, tint, maxWidth, letterSpacing, fontName, fontSize } = Object.assign(
+            {}, BitmapText.styleDefaults, style);
+
+        if (!BitmapFont.available[fontName])
+        {
+            throw new Error(`Missing BitmapFont "${fontName}"`);
+        }
+
+        /**
+         * Collection of page mesh data.
+         *
+         * @member {object}
+         * @private
+         */
+        this._activePagesMeshData = [];
 
         /**
          * Private tracker for the width of the overall text
@@ -88,33 +136,36 @@ export class BitmapText extends Container
         this._textHeight = 0;
 
         /**
-         * Private tracker for the letter sprite pool.
+         * Private tracker for the current text align.
          *
-         * @member {PIXI.Sprite[]}
+         * @member {string}
          * @private
          */
-        this._glyphs = [];
+        this._align = align;
 
         /**
-         * Private tracker for the current style.
+         * Private tracker for the current tint.
          *
-         * @member {object}
+         * @member {number}
          * @private
          */
-        this._font = {
-            tint: style.tint !== undefined ? style.tint : 0xFFFFFF,
-            align: style.align || 'left',
-            name: null,
-            size: 0,
-        };
+        this._tint = tint;
 
         /**
-         * Private tracker for the current font.
+         * Private tracker for the current font name.
          *
-         * @member {object}
+         * @member {string}
          * @private
          */
-        this.font = style.font; // run font setter
+        this._fontName = fontName;
+
+        /**
+         * Private tracker for the current font size.
+         *
+         * @member {number}
+         * @private
+         */
+        this._fontSize = fontSize || BitmapFont.available[fontName].size;
 
         /**
          * Private tracker for the current text.
@@ -132,11 +183,11 @@ export class BitmapText extends Container
          * @member {number}
          * @private
          */
-        this._maxWidth = 0;
+        this._maxWidth = maxWidth;
 
         /**
          * The max line height. This is useful when trying to use the total height of the Text,
-         * ie: when trying to vertically align.
+         * ie: when trying to vertically align. (Internally used)
          *
          * @member {number}
          * @private
@@ -148,7 +199,7 @@ export class BitmapText extends Container
          * @member {number}
          * @private
          */
-        this._letterSpacing = 0;
+        this._letterSpacing = letterSpacing;
 
         /**
          * Text anchor. read-only
@@ -159,41 +210,43 @@ export class BitmapText extends Container
         this._anchor = new ObservablePoint((): void => { this.dirty = true; }, this, 0, 0);
 
         /**
-         * The dirty state of this object.
+         * If true PixiJS will Math.floor() x/y values when rendering
          *
          * @member {boolean}
+         * @default PIXI.settings.ROUND_PIXELS
          */
-        this.dirty = false;
+        this._roundPixels = settings.ROUND_PIXELS;
 
         /**
-         * If true PixiJS will Math.floor() x/y values when rendering, stopping pixel interpolation.
-         * Advantages can include sharper image quality (like text) and faster rendering on canvas.
-         * The main disadvantage is movement of objects may appear less smooth.
-         * To set the global default, change {@link PIXI.settings.ROUND_PIXELS}
+         * Set to `true` if the BitmapText needs to be redrawn.
          *
          * @member {boolean}
-         * @default false
          */
-        this.roundPixels = settings.ROUND_PIXELS;
+        this.dirty = true;
 
-        this.updateText();
+        /**
+         * Cached char texture is destroyed when BitmapText is destroyed
+         * @member {Record<number, Texture>}
+         * @private
+         */
+        this._textureCache = {};
     }
 
     /**
-     * Renders text and updates it when needed
-     *
-     * @private
+     * Renders text and updates it when needed. This should only be called
+     * if the BitmapFont is regenerated.
      */
-    private updateText(): void
+    public updateText(): void
     {
-        const data = BitmapFont.available[this._font.name];
-        const scale = this._font.size / data.size;
+        const data = BitmapFont.available[this._fontName];
+        const scale = this._fontSize / data.size;
         const pos = new Point();
-        const chars = [];
+        const chars: CharRenderData[] = [];
         const lineWidths = [];
+        const lineSpaces = [];
         const text = this._text.replace(/(?:\r\n|\r)/g, '\n') || ' ';
         const textLength = text.length;
-        const maxWidth = this._maxWidth * data.size / this._font.size;
+        const maxWidth = this._maxWidth * data.size / this._fontSize;
 
         let prevCharCode = null;
         let lastLineWidth = 0;
@@ -203,6 +256,7 @@ export class BitmapText extends Container
         let lastBreakWidth = 0;
         let spacesRemoved = 0;
         let maxLineHeight = 0;
+        let spaceCount = 0;
 
         for (let i = 0; i < textLength; i++)
         {
@@ -213,11 +267,13 @@ export class BitmapText extends Container
             {
                 lastBreakPos = i;
                 lastBreakWidth = lastLineWidth;
+                spaceCount++;
             }
 
             if (char === '\r' || char === '\n')
             {
                 lineWidths.push(lastLineWidth);
+                lineSpaces.push(-1);
                 maxLineWidth = Math.max(maxLineWidth, lastLineWidth);
                 ++line;
                 ++spacesRemoved;
@@ -225,6 +281,7 @@ export class BitmapText extends Container
                 pos.x = 0;
                 pos.y += data.lineHeight;
                 prevCharCode = null;
+                spaceCount = 0;
                 continue;
             }
 
@@ -240,14 +297,25 @@ export class BitmapText extends Container
                 pos.x += charData.kerning[prevCharCode];
             }
 
-            chars.push({
-                texture: charData.texture,
-                line,
-                charCode,
-                position: new Point(pos.x + charData.xOffset + (this._letterSpacing / 2), pos.y + charData.yOffset),
-            });
+            const charRenderData = charRenderDataPool.pop() || {
+                texture: Texture.EMPTY,
+                line: 0,
+                charCode: 0,
+                prevSpaces: 0,
+                position: new Point(),
+            };
+
+            charRenderData.texture = charData.texture;
+            charRenderData.line = line;
+            charRenderData.charCode = charCode;
+            charRenderData.position.x = pos.x + charData.xOffset + (this._letterSpacing / 2);
+            charRenderData.position.y = pos.y + charData.yOffset;
+            charRenderData.prevSpaces = spaceCount;
+
+            chars.push(charRenderData);
+
+            lastLineWidth = charRenderData.position.x + charData.texture.orig.width;// Use charRenderData position!
             pos.x += charData.xAdvance + this._letterSpacing;
-            lastLineWidth = pos.x;
             maxLineHeight = Math.max(maxLineHeight, (charData.yOffset + charData.texture.height));
             prevCharCode = charCode;
 
@@ -259,12 +327,14 @@ export class BitmapText extends Container
                 lastBreakPos = -1;
 
                 lineWidths.push(lastBreakWidth);
+                lineSpaces.push(chars.length > 0 ? chars[chars.length - 1].prevSpaces : 0);
                 maxLineWidth = Math.max(maxLineWidth, lastBreakWidth);
                 line++;
 
                 pos.x = 0;
                 pos.y += data.lineHeight;
                 prevCharCode = null;
+                spaceCount = 0;
             }
         }
 
@@ -279,6 +349,7 @@ export class BitmapText extends Container
 
             lineWidths.push(lastLineWidth);
             maxLineWidth = Math.max(maxLineWidth, lastLineWidth);
+            lineSpaces.push(-1);
         }
 
         const lineAlignOffsets = [];
@@ -287,66 +358,243 @@ export class BitmapText extends Container
         {
             let alignOffset = 0;
 
-            if (this._font.align === 'right')
+            if (this._align === 'right')
             {
                 alignOffset = maxLineWidth - lineWidths[i];
             }
-            else if (this._font.align === 'center')
+            else if (this._align === 'center')
             {
                 alignOffset = (maxLineWidth - lineWidths[i]) / 2;
+            }
+            else if (this._align === 'justify')
+            {
+                alignOffset = lineSpaces[i] < 0 ? 0 : (maxLineWidth - lineWidths[i]) / lineSpaces[i];
             }
 
             lineAlignOffsets.push(alignOffset);
         }
 
         const lenChars = chars.length;
-        const tint = this.tint;
+
+        const pagesMeshData: Record<number, PageMeshData> = {};
+
+        const newPagesMeshData: PageMeshData[] = [];
+
+        const activePagesMeshData = this._activePagesMeshData;
+
+        for (let i = 0; i < activePagesMeshData.length; i++)
+        {
+            pageMeshDataPool.push(activePagesMeshData[i]);
+        }
 
         for (let i = 0; i < lenChars; i++)
         {
-            let c = this._glyphs[i]; // get the next glyph sprite
+            const texture = chars[i].texture;
+            const baseTextureUid = texture.baseTexture.uid;
 
-            if (c)
+            if (!pagesMeshData[baseTextureUid])
             {
-                c.texture = chars[i].texture;
+                let pageMeshData = pageMeshDataPool.pop();
+
+                if (!pageMeshData)
+                {
+                    const geometry = new MeshGeometry();
+                    const material = new MeshMaterial(Texture.EMPTY);
+
+                    const mesh = new Mesh(geometry, material);
+
+                    pageMeshData = {
+                        index: 0,
+                        indexCount: 0,
+                        vertexCount: 0,
+                        uvsCount: 0,
+                        total: 0,
+                        mesh,
+                        vertices: null,
+                        uvs: null,
+                        indices: null,
+                    };
+                }
+
+                // reset data..
+                pageMeshData.index = 0;
+                pageMeshData.indexCount = 0;
+                pageMeshData.vertexCount = 0;
+                pageMeshData.uvsCount = 0;
+                pageMeshData.total = 0;
+
+                // TODO need to get page texture here somehow..
+                const { _textureCache } = this;
+
+                _textureCache[baseTextureUid] = _textureCache[baseTextureUid] || new Texture(texture.baseTexture);
+                pageMeshData.mesh.texture = _textureCache[baseTextureUid];
+
+                pageMeshData.mesh.tint = this._tint;
+
+                newPagesMeshData.push(pageMeshData);
+
+                pagesMeshData[baseTextureUid] = pageMeshData;
             }
-            else
-            {
-                c = new Sprite(chars[i].texture);
-                c.roundPixels = this.roundPixels;
-                this._glyphs.push(c);
-            }
 
-            c.position.x = (chars[i].position.x + lineAlignOffsets[chars[i].line]) * scale;
-            c.position.y = chars[i].position.y * scale;
-            c.scale.x = c.scale.y = scale;
-            c.tint = tint;
+            pagesMeshData[baseTextureUid].total++;
+        }
 
-            if (!c.parent)
+        // lets find any previously active pageMeshDatas that are no longer required for
+        // the updated text (if any), removed and return them to the pool.
+        for (let i = 0; i < activePagesMeshData.length; i++)
+        {
+            if (newPagesMeshData.indexOf(activePagesMeshData[i]) === -1)
             {
-                this.addChild(c);
+                this.removeChild(activePagesMeshData[i].mesh);
             }
         }
 
-        // remove unnecessary children.
-        for (let i = lenChars; i < this._glyphs.length; ++i)
+        // next lets add any new meshes, that have not yet been added to this BitmapText
+        // we only add if its not already a child of this BitmapObject
+        for (let i = 0; i < newPagesMeshData.length; i++)
         {
-            this.removeChild(this._glyphs[i]);
+            if (newPagesMeshData[i].mesh.parent !== this)
+            {
+                this.addChild(newPagesMeshData[i].mesh);
+            }
+        }
+
+        // active page mesh datas are set to be the new pages added.
+        this._activePagesMeshData = newPagesMeshData;
+
+        for (const i in pagesMeshData)
+        {
+            const pageMeshData = pagesMeshData[i];
+            const total = pageMeshData.total;
+
+            // lets only allocate new buffers if we can fit the new text in the current ones..
+            // unless that is, we will be batching. Currently batching dose not respect the size property of mesh
+            if (!(pageMeshData.indices?.length > 6 * total) || pageMeshData.vertices.length < Mesh.BATCHABLE_SIZE * 2)
+            {
+                pageMeshData.vertices = new Float32Array(4 * 2 * total);
+                pageMeshData.uvs = new Float32Array(4 * 2 * total);
+                pageMeshData.indices = new Uint16Array(6 * total);
+            }
+            else
+            {
+                const total = pageMeshData.total;
+                const vertices = pageMeshData.vertices;
+
+                // Clear the garbage at the end of the vertices buffer. This will prevent the bounds miscalculation.
+                for (let i = total * 4 * 2; i < vertices.length; i++)
+                {
+                    vertices[i] = 0;
+                }
+            }
+
+            // as a buffer maybe bigger than the current word, we set the size of the meshMaterial
+            // to match the number of letters needed
+            pageMeshData.mesh.size = 6 * total;
+        }
+
+        for (let i = 0; i < lenChars; i++)
+        {
+            const char = chars[i];
+            let offset = char.position.x + (lineAlignOffsets[char.line] * (this._align === 'justify' ? char.prevSpaces : 1));
+
+            if (this._roundPixels)
+            {
+                offset = Math.round(offset);
+            }
+
+            const xPos = offset * scale;
+            const yPos = char.position.y * scale;
+            const texture = char.texture;
+
+            const pageMesh = pagesMeshData[texture.baseTexture.uid];
+
+            const textureFrame = texture.frame;
+            const textureUvs = texture._uvs;
+
+            const index = pageMesh.index++;
+
+            pageMesh.indices[(index * 6) + 0] = 0 + (index * 4);
+            pageMesh.indices[(index * 6) + 1] = 1 + (index * 4);
+            pageMesh.indices[(index * 6) + 2] = 2 + (index * 4);
+            pageMesh.indices[(index * 6) + 3] = 0 + (index * 4);
+            pageMesh.indices[(index * 6) + 4] = 2 + (index * 4);
+            pageMesh.indices[(index * 6) + 5] = 3 + (index * 4);
+
+            pageMesh.vertices[(index * 8) + 0] = xPos;
+            pageMesh.vertices[(index * 8) + 1] = yPos;
+
+            pageMesh.vertices[(index * 8) + 2] = xPos + (textureFrame.width * scale);
+            pageMesh.vertices[(index * 8) + 3] = yPos;
+
+            pageMesh.vertices[(index * 8) + 4] = xPos + (textureFrame.width * scale);
+            pageMesh.vertices[(index * 8) + 5] = yPos + (textureFrame.height * scale);
+
+            pageMesh.vertices[(index * 8) + 6] = xPos;
+            pageMesh.vertices[(index * 8) + 7] = yPos + (textureFrame.height * scale);
+
+            pageMesh.uvs[(index * 8) + 0] = textureUvs.x0;
+            pageMesh.uvs[(index * 8) + 1] = textureUvs.y0;
+
+            pageMesh.uvs[(index * 8) + 2] = textureUvs.x1;
+            pageMesh.uvs[(index * 8) + 3] = textureUvs.y1;
+
+            pageMesh.uvs[(index * 8) + 4] = textureUvs.x2;
+            pageMesh.uvs[(index * 8) + 5] = textureUvs.y2;
+
+            pageMesh.uvs[(index * 8) + 6] = textureUvs.x3;
+            pageMesh.uvs[(index * 8) + 7] = textureUvs.y3;
         }
 
         this._textWidth = maxLineWidth * scale;
         this._textHeight = (pos.y + data.lineHeight) * scale;
 
-        // apply anchor
-        if (this.anchor.x !== 0 || this.anchor.y !== 0)
+        for (const i in pagesMeshData)
         {
-            for (let i = 0; i < lenChars; i++)
+            const pageMeshData = pagesMeshData[i];
+
+            // apply anchor
+            if (this.anchor.x !== 0 || this.anchor.y !== 0)
             {
-                this._glyphs[i].x -= this._textWidth * this.anchor.x;
-                this._glyphs[i].y -= this._textHeight * this.anchor.y;
+                let vertexCount = 0;
+
+                const anchorOffsetX = this._textWidth * this.anchor.x;
+                const anchorOffsetY = this._textHeight * this.anchor.y;
+
+                for (let i = 0; i < pageMeshData.total; i++)
+                {
+                    pageMeshData.vertices[vertexCount++] -= anchorOffsetX;
+                    pageMeshData.vertices[vertexCount++] -= anchorOffsetY;
+
+                    pageMeshData.vertices[vertexCount++] -= anchorOffsetX;
+                    pageMeshData.vertices[vertexCount++] -= anchorOffsetY;
+
+                    pageMeshData.vertices[vertexCount++] -= anchorOffsetX;
+                    pageMeshData.vertices[vertexCount++] -= anchorOffsetY;
+
+                    pageMeshData.vertices[vertexCount++] -= anchorOffsetX;
+                    pageMeshData.vertices[vertexCount++] -= anchorOffsetY;
+                }
             }
+
+            this._maxLineHeight = maxLineHeight * scale;
+
+            const vertexBuffer = pageMeshData.mesh.geometry.getBuffer('aVertexPosition');
+            const textureBuffer = pageMeshData.mesh.geometry.getBuffer('aTextureCoord');
+            const indexBuffer = pageMeshData.mesh.geometry.getIndex();
+
+            vertexBuffer.data = pageMeshData.vertices;
+            textureBuffer.data = pageMeshData.uvs;
+            indexBuffer.data = pageMeshData.indices;
+
+            vertexBuffer.update();
+            textureBuffer.update();
+            indexBuffer.update();
         }
-        this._maxLineHeight = maxLineHeight * scale;
+
+        for (let i = 0; i < chars.length; i++)
+        {
+            charRenderDataPool.push(chars[i]);
+        }
     }
 
     /**
@@ -390,17 +638,23 @@ export class BitmapText extends Container
      * The tint of the BitmapText object.
      *
      * @member {number}
+     * @default 0xffffff
      */
     public get tint(): number
     {
-        return this._font.tint;
+        return this._tint;
     }
 
-    public set tint(value) // eslint-disable-line require-jsdoc
+    public set tint(value: number)
     {
-        this._font.tint = (typeof value === 'number' && value >= 0) ? value : 0xFFFFFF;
+        if (this._tint === value) return;
 
-        this.dirty = true;
+        this._tint = value;
+
+        for (let i = 0; i < this._activePagesMeshData.length; i++)
+        {
+            this._activePagesMeshData[i].mesh.tint = value;
+        }
     }
 
     /**
@@ -409,16 +663,61 @@ export class BitmapText extends Container
      * @member {string}
      * @default 'left'
      */
-    public get align(): BitmapTextAlign
+    public get align(): TextStyleAlign
     {
-        return this._font.align;
+        return this._align;
     }
 
-    public set align(value) // eslint-disable-line require-jsdoc
+    public set align(value: TextStyleAlign)
     {
-        this._font.align = value || 'left';
+        if (this._align !== value)
+        {
+            this._align = value;
+            this.dirty = true;
+        }
+    }
 
-        this.dirty = true;
+    /**
+     * The name of the BitmapFont.
+     *
+     * @member {string}
+     */
+    public get fontName(): string
+    {
+        return this._fontName;
+    }
+
+    public set fontName(value: string)
+    {
+        if (!BitmapFont.available[value])
+        {
+            throw new Error(`Missing BitmapFont "${value}"`);
+        }
+
+        if (this._fontName !== value)
+        {
+            this._fontName = value;
+            this.dirty = true;
+        }
+    }
+
+    /**
+     * The size of the font to display.
+     *
+     * @member {number}
+     */
+    public get fontSize(): number
+    {
+        return this._fontSize;
+    }
+
+    public set fontSize(value: number)
+    {
+        if (this._fontSize !== value)
+        {
+            this._fontSize = value;
+            this.dirty = true;
+        }
     }
 
     /**
@@ -437,7 +736,7 @@ export class BitmapText extends Container
         return this._anchor;
     }
 
-    public set anchor(value: ObservablePoint) // eslint-disable-line require-jsdoc
+    public set anchor(value: ObservablePoint)
     {
         if (typeof value === 'number')
         {
@@ -450,44 +749,6 @@ export class BitmapText extends Container
     }
 
     /**
-     * The font descriptor of the BitmapText object.
-     *
-     * @member {object}
-     */
-    public get font(): IBitmapTextFontDescriptor | string
-    {
-        return this._font;
-    }
-
-    public set font(value: IBitmapTextFontDescriptor | string) // eslint-disable-line require-jsdoc
-    {
-        if (!value)
-        {
-            return;
-        }
-
-        if (typeof value === 'string')
-        {
-            const valueSplit = value.split(' ');
-
-            this._font.name = valueSplit.length === 1
-                ? valueSplit[0]
-                : valueSplit.slice(1).join(' ');
-
-            this._font.size = valueSplit.length >= 2
-                ? parseInt(valueSplit[0], 10)
-                : BitmapFont.available[this._font.name].size;
-        }
-        else
-        {
-            this._font.name = value.name;
-            this._font.size = typeof value.size === 'number' ? value.size : parseInt(value.size, 10);
-        }
-
-        this.dirty = true;
-    }
-
-    /**
      * The text of the BitmapText object.
      *
      * @member {string}
@@ -497,7 +758,7 @@ export class BitmapText extends Container
         return this._text;
     }
 
-    public set text(text) // eslint-disable-line require-jsdoc
+    public set text(text: string)
     {
         text = String(text === null || text === undefined ? '' : text);
 
@@ -521,7 +782,7 @@ export class BitmapText extends Container
         return this._maxWidth;
     }
 
-    public set maxWidth(value) // eslint-disable-line require-jsdoc
+    public set maxWidth(value: number)
     {
         if (this._maxWidth === value)
         {
@@ -569,11 +830,34 @@ export class BitmapText extends Container
         return this._letterSpacing;
     }
 
-    public set letterSpacing(value) // eslint-disable-line require-jsdoc
+    public set letterSpacing(value: number)
     {
         if (this._letterSpacing !== value)
         {
             this._letterSpacing = value;
+            this.dirty = true;
+        }
+    }
+
+    /**
+     * If true PixiJS will Math.floor() x/y values when rendering, stopping pixel interpolation.
+     * Advantages can include sharper image quality (like text) and faster rendering on canvas.
+     * The main disadvantage is movement of objects may appear less smooth.
+     * To set the global default, change {@link PIXI.settings.ROUND_PIXELS}
+     *
+     * @member {boolean}
+     * @default PIXI.settings.ROUND_PIXELS
+     */
+    public get roundPixels(): boolean
+    {
+        return this._roundPixels;
+    }
+
+    public set roundPixels(value: boolean)
+    {
+        if (value !== this._roundPixels)
+        {
+            this._roundPixels = value;
             this.dirty = true;
         }
     }
@@ -592,33 +876,20 @@ export class BitmapText extends Container
         return this._textHeight;
     }
 
-    /**
-     * Register a bitmap font with data and a texture.
-     *
-     * @deprecated since 5.3.0
-     * @see PIXI.BitmapFont.install
-     * @static
-     */
-    static registerFont(data: string|XMLDocument|BitmapFontData, textures: Texture|Texture[]|Dict<Texture>): BitmapFont
+    destroy(options?: boolean | IDestroyOptions): void
     {
-        deprecation('5.3.0', 'PIXI.BitmapText.registerFont is deprecated, use PIXI.BitmapFont.install');
+        const { _textureCache } = this;
 
-        return BitmapFont.install(data, textures);
-    }
+        for (const id in _textureCache)
+        {
+            const texture = _textureCache[id];
 
-    /**
-     * Get the list of installed fonts.
-     *
-     * @see PIXI.BitmapFont.available
-     * @deprecated since 5.3.0
-     * @static
-     * @readonly
-     * @member {Object.<string, PIXI.BitmapFont>}
-     */
-    static get fonts(): Dict<BitmapFont>
-    {
-        deprecation('5.3.0', 'PIXI.BitmapText.fonts is deprecated, use PIXI.BitmapFont.available');
+            texture.destroy();
+            delete _textureCache[id];
+        }
 
-        return BitmapFont.available;
+        this._textureCache = null;
+
+        super.destroy(options);
     }
 }

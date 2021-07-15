@@ -1,4 +1,6 @@
-const GLSL_TO_SIZE: {[x: string]: number} = {
+import type { Dict } from '@pixi/utils';
+
+const GLSL_TO_SIZE: Dict<number> = {
     float:    1,
     vec2:     2,
     vec3:     3,
@@ -8,6 +10,11 @@ const GLSL_TO_SIZE: {[x: string]: number} = {
     ivec2:    2,
     ivec3:    3,
     ivec4:    4,
+
+    uint:     1,
+    uvec2:    2,
+    uvec3:    3,
+    uvec4:    4,
 
     bool:     1,
     bvec2:    2,
@@ -25,7 +32,7 @@ const GLSL_TO_SIZE: {[x: string]: number} = {
  * @private
  * @method mapSize
  * @memberof PIXI.glCore.shader
- * @param type {String}
+ * @param {String} type
  * @return {Number}
  */
 export function mapSize(type: string): number

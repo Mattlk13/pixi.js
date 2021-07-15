@@ -1,8 +1,6 @@
 import { UPDATE_PRIORITY } from './const';
 import { Ticker } from './Ticker';
 
-import type { IApplicationOptions } from '@pixi/app';
-
 /**
  * Middleware for for Application Ticker.
  *
@@ -28,7 +26,7 @@ export class TickerPlugin
      * @private
      * @param {object} [options] - See application options
      */
-    static init(options?: IApplicationOptions): void
+    static init(options?: GlobalMixins.IApplicationOptions): void
     {
         // Set default
         options = Object.assign({
@@ -60,7 +58,9 @@ export class TickerPlugin
         /**
          * Convenience method for stopping the render.
          *
-         * @method PIXI.Application#stop
+         * @method
+         * @memberof PIXI.Application
+         * @instance
          */
         this.stop = (): void =>
         {
@@ -70,7 +70,9 @@ export class TickerPlugin
         /**
          * Convenience method for starting the render.
          *
-         * @method PIXI.Application#start
+         * @method
+         * @memberof PIXI.Application
+         * @instance
          */
         this.start = (): void =>
         {

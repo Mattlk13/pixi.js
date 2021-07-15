@@ -71,6 +71,12 @@ function quadraticBezierCurve(
         x = getPt(xa, xb, j);
         y = getPt(ya, yb, j);
 
+        // Handle case when first curve points overlaps and earcut fails to triangulate
+        if (i === 0 && points[points.length - 2] === x && points[points.length - 1] === y)
+        {
+            continue;
+        }
+
         points.push(x, y);
     }
 
@@ -99,29 +105,38 @@ export const buildRoundedRectangle: IShapeBuildCommand = {
         const width = rrectData.width;
         const height = rrectData.height;
 
-        const radius = rrectData.radius;
+        // Don't allow negative radius or greater than half the smallest width
+        const radius = Math.max(0, Math.min(rrectData.radius, Math.min(width, height) / 2));
 
         points.length = 0;
 
-        quadraticBezierCurve(x, y + radius,
-            x, y,
-            x + radius, y,
-            points);
-        quadraticBezierCurve(x + width - radius,
-            y, x + width, y,
-            x + width, y + radius,
-            points);
-        quadraticBezierCurve(x + width, y + height - radius,
-            x + width, y + height,
-            x + width - radius, y + height,
-            points);
-        quadraticBezierCurve(x + radius, y + height,
-            x, y + height,
-            x, y + height - radius,
-            points);
-
-        // this tiny number deals with the issue that occurs when points overlap and earcut fails to triangulate the item.
-        // TODO - fix this properly, this is not very elegant.. but it works for now.
+        // No radius, do a simple rectangle
+        if (!radius)
+        {
+            points.push(x, y,
+                x + width, y,
+                x + width, y + height,
+                x, y + height);
+        }
+        else
+        {
+            quadraticBezierCurve(x, y + radius,
+                x, y,
+                x + radius, y,
+                points);
+            quadraticBezierCurve(x + width - radius,
+                y, x + width, y,
+                x + width, y + radius,
+                points);
+            quadraticBezierCurve(x + width, y + height - radius,
+                x + width, y + height,
+                x + width - radius, y + height,
+                points);
+            quadraticBezierCurve(x + radius, y + height,
+                x, y + height,
+                x, y + height - radius,
+                points);
+        }
     },
 
     triangulate(graphicsData, graphicsGeometry)

@@ -1,15 +1,12 @@
 import './settings';
 
-import * as resources from './textures/resources';
-import * as systems from './systems';
-
-export { systems };
-export { resources };
-
+export * from './textures/resources';
+export * from './systems';
 export * from './IRenderingContext';
+export * from './IRenderableObject';
 export * from './autoDetectRenderer';
 export * from './fragments';
-export * from './System';
+export * from './ISystem';
 export * from './Renderer';
 export * from './AbstractRenderer';
 export * from './framebuffer/Framebuffer';
@@ -34,6 +31,7 @@ export * from './utils/Quad';
 export * from './utils/QuadUv';
 export * from './shader/utils/checkMaxIfStatementsInShader';
 export * from './shader/utils/uniformParsers';
+export * from './shader/utils/generateUniformBufferSync';
 export * from './shader/Shader';
 export * from './shader/Program';
 export * from './shader/GLProgram';
@@ -47,3 +45,4 @@ export * from './geometry/Attribute';
 export * from './geometry/Buffer';
 export * from './geometry/Geometry';
 export * from './geometry/ViewableBuffer';
+export * from './deprecations';

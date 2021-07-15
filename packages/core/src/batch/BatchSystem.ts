@@ -1,6 +1,6 @@
-import { System } from '../System';
 import { ObjectRenderer } from './ObjectRenderer';
 
+import type { ISystem } from '../ISystem';
 import type { Renderer } from '../Renderer';
 import type { BaseTexture } from '../textures/BaseTexture';
 import type { BatchTextureArray } from './BatchTextureArray';
@@ -9,19 +9,20 @@ import type { BatchTextureArray } from './BatchTextureArray';
  *
  * @class
  * @extends PIXI.System
- * @memberof PIXI.systems
+ * @memberof PIXI
  */
-export class BatchSystem extends System
+export class BatchSystem implements ISystem
 {
     public readonly emptyRenderer: ObjectRenderer;
     public currentRenderer: ObjectRenderer;
+    private renderer: Renderer;
 
     /**
      * @param {PIXI.Renderer} renderer - The renderer this System works for.
      */
     constructor(renderer: Renderer)
     {
-        super(renderer);
+        this.renderer = renderer;
 
         /**
          * An empty renderer.
@@ -77,8 +78,8 @@ export class BatchSystem extends System
      * Handy function for batch renderers: copies bound textures in first maxTextures locations to array
      * sets actual _batchLocation for them
      *
-     * @param {PIXI.BaseTexture[]} arr copy destination
-     * @param {number} maxTextures number of copied elements
+     * @param {PIXI.BaseTexture[]} arr - arr copy destination
+     * @param {number} maxTextures - number of copied elements
      */
     copyBoundTextures(arr: BaseTexture[], maxTextures: number): void
     {
@@ -99,10 +100,10 @@ export class BatchSystem extends System
      * All textures in texArray should have `_batchEnabled = _batchId`,
      * and their count should be less than `maxTextures`.
      *
-     * @param {PIXI.BatchTextureArray} texArray textures to bound
-     * @param {PIXI.BaseTexture[]} boundTextures current state of bound textures
-     * @param {number} batchId marker for _batchEnabled param of textures in texArray
-     * @param {number} maxTextures number of texture locations to manipulate
+     * @param {PIXI.BatchTextureArray} texArray - textures to bound
+     * @param {PIXI.BaseTexture[]} boundTextures - current state of bound textures
+     * @param {number} batchId - marker for _batchEnabled param of textures in texArray
+     * @param {number} maxTextures - number of texture locations to manipulate
      */
     boundArray(texArray: BatchTextureArray, boundTextures: Array<BaseTexture>,
         batchId: number, maxTextures: number): void
@@ -139,5 +140,13 @@ export class BatchSystem extends System
                 break;
             }
         }
+    }
+
+    /**
+     * @ignore
+     */
+    destroy(): void
+    {
+        this.renderer = null;
     }
 }

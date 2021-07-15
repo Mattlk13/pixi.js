@@ -7,12 +7,14 @@ import { sign } from '@pixi/utils';
 
 import type { IBaseTextureOptions, Renderer, TextureSource } from '@pixi/core';
 import type { IDestroyOptions } from '@pixi/display';
-import type { IPoint } from '@pixi/math';
+import type { IPointData } from '@pixi/math';
 
 const tempPoint = new Point();
 const indices = new Uint16Array([0, 1, 2, 0, 2, 3]);
 
 export type SpriteSource = TextureSource|Texture;
+
+export interface Sprite extends GlobalMixins.Sprite, Container {}
 
 /**
  * The Sprite object is the base for all textured objects that are rendered to the screen
@@ -49,8 +51,8 @@ export class Sprite extends Container
     _width: number;
     _height: number;
     _texture: Texture;
-    protected _cachedTint: number;
-    protected _textureID: number;
+    _textureID: number;
+    _cachedTint: number;
     protected _textureTrimmedID: number;
     protected uvs: Float32Array;
     protected _anchor: ObservablePoint;
@@ -62,14 +64,13 @@ export class Sprite extends Container
     private _transformTrimmedID: number;
     private _tint: number;
 
-    // eslint-disable-next-line @typescript-eslint/ban-ts-ignore
-    // @ts-ignore
+    // Internal-only properties
     _tintRGB: number;
 
     /**
      * @param {PIXI.Texture} [texture] - The texture for this sprite.
      */
-    constructor(texture: Texture)
+    constructor(texture?: Texture)
     {
         super();
 
@@ -442,10 +443,10 @@ export class Sprite extends Container
     /**
      * Gets the local bounds of the sprite object.
      *
-     * @param {PIXI.Rectangle} [rect] - The output rectangle.
+     * @param {PIXI.Rectangle} [rect] - Optional output rectangle.
      * @return {PIXI.Rectangle} The bounds.
      */
-    public getLocalBounds(rect: Rectangle): Rectangle
+    public getLocalBounds(rect?: Rectangle): Rectangle
     {
         // we can do a fast local bounds if the sprite has no children!
         if (this.children.length === 0)
@@ -474,10 +475,10 @@ export class Sprite extends Container
     /**
      * Tests if a point is inside this sprite
      *
-     * @param {PIXI.IPoint} point - the point to test
+     * @param {PIXI.IPointData} point - the point to test
      * @return {boolean} the result of the test
      */
-    public containsPoint(point: IPoint): boolean
+    public containsPoint(point: IPointData): boolean
     {
         this.worldTransform.applyInverse(point, tempPoint);
 
@@ -509,7 +510,7 @@ export class Sprite extends Container
      * @param {boolean} [options.texture=false] - Should it destroy the current texture of the sprite as well
      * @param {boolean} [options.baseTexture=false] - Should it destroy the base texture of the sprite as well
      */
-    public destroy(options: IDestroyOptions|boolean): void
+    public destroy(options?: IDestroyOptions|boolean): void
     {
         super.destroy(options);
 
@@ -536,11 +537,11 @@ export class Sprite extends Container
      * The source can be - frame id, image url, video url, canvas element, video element, base texture
      *
      * @static
-     * @param {string|PIXI.Texture|HTMLCanvasElement|HTMLVideoElement} source Source to create texture from
-     * @param {object} [options] See {@link PIXI.BaseTexture}'s constructor for options.
+     * @param {string|PIXI.Texture|HTMLCanvasElement|HTMLVideoElement} source - Source to create texture from
+     * @param {object} [options] - See {@link PIXI.BaseTexture}'s constructor for options.
      * @return {PIXI.Sprite} The newly created sprite
      */
-    static from(source: SpriteSource, options: IBaseTextureOptions): Sprite
+    static from(source: SpriteSource, options?: IBaseTextureOptions): Sprite
     {
         const texture = (source instanceof Texture)
             ? source
@@ -558,7 +559,7 @@ export class Sprite extends Container
      * @member {boolean}
      * @default false
      */
-    set roundPixels(value)
+    set roundPixels(value: boolean)
     {
         if (this._roundPixels !== value)
         {
@@ -582,7 +583,7 @@ export class Sprite extends Container
         return Math.abs(this.scale.x) * this._texture.orig.width;
     }
 
-    set width(value) // eslint-disable-line require-jsdoc
+    set width(value: number)
     {
         const s = sign(this.scale.x) || 1;
 
@@ -600,7 +601,7 @@ export class Sprite extends Container
         return Math.abs(this.scale.y) * this._texture.orig.height;
     }
 
-    set height(value) // eslint-disable-line require-jsdoc
+    set height(value: number)
     {
         const s = sign(this.scale.y) || 1;
 
@@ -609,14 +610,14 @@ export class Sprite extends Container
     }
 
     /**
-     * The anchor sets the origin point of the text. The default value is taken from the {@link PIXI.Texture|Texture}
+     * The anchor sets the origin point of the sprite. The default value is taken from the {@link PIXI.Texture|Texture}
      * and passed to the constructor.
      *
-     * The default is `(0,0)`, this means the text's origin is the top left.
+     * The default is `(0,0)`, this means the sprite's origin is the top left.
      *
-     * Setting the anchor to `(0.5,0.5)` means the text's origin is centered.
+     * Setting the anchor to `(0.5,0.5)` means the sprite's origin is centered.
      *
-     * Setting the anchor to `(1,1)` would mean the text's origin point will be the bottom right corner.
+     * Setting the anchor to `(1,1)` would mean the sprite's origin point will be the bottom right corner.
      *
      * If you pass only single parameter, it will set both x and y to the same value as shown in the example below.
      *
@@ -631,7 +632,7 @@ export class Sprite extends Container
         return this._anchor;
     }
 
-    set anchor(value) // eslint-disable-line require-jsdoc
+    set anchor(value: ObservablePoint)
     {
         this._anchor.copyFrom(value);
     }
@@ -648,7 +649,7 @@ export class Sprite extends Container
         return this._tint;
     }
 
-    set tint(value) // eslint-disable-line require-jsdoc
+    set tint(value: number)
     {
         this._tint = value;
         this._tintRGB = (value >> 16) + (value & 0xff00) + ((value & 0xff) << 16);
@@ -664,7 +665,7 @@ export class Sprite extends Container
         return this._texture;
     }
 
-    set texture(value) // eslint-disable-line require-jsdoc
+    set texture(value: Texture)
     {
         if (this._texture === value)
         {

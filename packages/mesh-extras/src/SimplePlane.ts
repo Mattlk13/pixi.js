@@ -3,6 +3,7 @@ import { Mesh, MeshMaterial } from '@pixi/mesh';
 import { PlaneGeometry } from './geometry/PlaneGeometry';
 
 import type{ Renderer } from '@pixi/core';
+import type { IDestroyOptions } from '@pixi/display';
 
 /**
  * The SimplePlane allows you to draw a texture across several points and then manipulate these points
@@ -21,6 +22,11 @@ import type{ Renderer } from '@pixi/core';
  */
 export class SimplePlane extends Mesh
 {
+    /**
+     * The geometry is automatically updated when the texture size changes
+     */
+    public autoResize: boolean;
+
     protected _textureID: number;
 
     /**
@@ -37,6 +43,7 @@ export class SimplePlane extends Mesh
 
         // lets call the setter to ensure all necessary updates are performed
         this.texture = texture;
+        this.autoResize = true;
     }
 
     /**
@@ -48,14 +55,17 @@ export class SimplePlane extends Mesh
         this._textureID = this.shader.texture._updateID;
 
         const geometry: PlaneGeometry = this.geometry as any;
+        const { width, height } = this.shader.texture;
 
-        geometry.width = this.shader.texture.width;
-        geometry.height = this.shader.texture.height;
-
-        geometry.build();
+        if (this.autoResize && (geometry.width !== width || geometry.height !== height))
+        {
+            geometry.width = this.shader.texture.width;
+            geometry.height = this.shader.texture.height;
+            geometry.build();
+        }
     }
 
-    set texture(value)
+    set texture(value: Texture)
     {
         // Track texture same way sprite does.
         // For generated meshes like NineSlicePlane it can change the geometry.
@@ -92,5 +102,11 @@ export class SimplePlane extends Mesh
         }
 
         super._render(renderer);
+    }
+
+    public destroy(options?: IDestroyOptions|boolean): void
+    {
+        this.shader.texture.off('update', this.textureUpdated, this);
+        super.destroy(options);
     }
 }

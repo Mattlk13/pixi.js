@@ -1,13 +1,12 @@
-import { hex2string, hex2rgb, deprecation, EventEmitter } from '@pixi/utils';
+import { hex2string, hex2rgb, EventEmitter, deprecation } from '@pixi/utils';
 import { Matrix, Rectangle } from '@pixi/math';
-import { RENDERER_TYPE } from '@pixi/constants';
+import { MSAA_QUALITY, RENDERER_TYPE } from '@pixi/constants';
 import { settings } from '@pixi/settings';
-import { DisplayObject, TemporaryDisplayObject } from '@pixi/display';
 import { RenderTexture } from './renderTexture/RenderTexture';
 
 import type { SCALE_MODES } from '@pixi/constants';
 import type { IRenderingContext } from './IRenderingContext';
-import type { Container } from '@pixi/display';
+import type { IRenderableContainer, IRenderableObject } from './IRenderableObject';
 
 const tempMatrix = new Matrix();
 
@@ -16,26 +15,33 @@ export interface IRendererOptions extends GlobalMixins.IRendererOptions
     width?: number;
     height?: number;
     view?: HTMLCanvasElement;
-    transparent?: boolean | 'notMultiplied';
+    useContextAlpha?: boolean | 'notMultiplied';
+    /**
+     * Use `backgroundAlpha` instead.
+     * @deprecated
+     */
+    transparent?: boolean;
     autoDensity?: boolean;
     antialias?: boolean;
     resolution?: number;
     preserveDrawingBuffer?: boolean;
     clearBeforeRender?: boolean;
     backgroundColor?: number;
+    backgroundAlpha?: number;
     powerPreference?: WebGLPowerPreference;
     context?: IRenderingContext;
-}
-
-interface IRendererOptionsLegacy extends IRendererOptions
-{
-    autoResize?: boolean;
-    roundPixels?: boolean;
 }
 
 export interface IRendererPlugins
 {
     [key: string]: any;
+}
+
+export interface IRendererRenderOptions {
+    renderTexture?: RenderTexture;
+    clear?: boolean;
+    transform?: Matrix;
+    skipUpdateTransform?: boolean;
 }
 
 /**
@@ -56,34 +62,35 @@ export abstract class AbstractRenderer extends EventEmitter
     public readonly screen: Rectangle;
     public readonly view: HTMLCanvasElement;
     public readonly plugins: IRendererPlugins;
-    public readonly transparent: boolean | 'notMultiplied';
+    public readonly useContextAlpha: boolean | 'notMultiplied';
     public readonly autoDensity: boolean;
     public readonly preserveDrawingBuffer: boolean;
 
-    protected readonly _tempDisplayObjectParent: DisplayObject;
     protected _backgroundColor: number;
     protected _backgroundColorString: string;
     _backgroundColorRgba: number[];
-    _lastObjectRendered: DisplayObject;
+    _lastObjectRendered: IRenderableObject;
 
     /**
-     * @param {string} system - The name of the system this renderer is for.
-     * @param {object} [options] - The optional renderer parameters.
+     * @param system - The name of the system this renderer is for.
+     * @param [options] - The optional renderer parameters.
      * @param {number} [options.width=800] - The width of the screen.
      * @param {number} [options.height=600] - The height of the screen.
      * @param {HTMLCanvasElement} [options.view] - The canvas to use as a view, optional.
-     * @param {boolean} [options.transparent=false] - If the render view is transparent.
+     * @param {boolean} [options.useContextAlpha=true] - Pass-through value for canvas' context `alpha` property.
+     *   If you want to set transparency, please use `backgroundAlpha`. This option is for cases where the
+     *   canvas needs to be opaque, possibly for performance reasons on some older devices.
      * @param {boolean} [options.autoDensity=false] - Resizes renderer view in CSS pixels to allow for
      *   resolutions other than 1.
      * @param {boolean} [options.antialias=false] - Sets antialias
-     * @param {number} [options.resolution=1] - The resolution / device pixel ratio of the renderer. The
-     *  resolution of the renderer retina would be 2.
+     * @param {number} [options.resolution=PIXI.settings.RESOLUTION] - The resolution / device pixel ratio of the renderer.
      * @param {boolean} [options.preserveDrawingBuffer=false] - Enables drawing buffer preservation,
      *  enable this if you need to call toDataUrl on the WebGL context.
      * @param {boolean} [options.clearBeforeRender=true] - This sets if the renderer will clear the canvas or
      *      not before the new render pass.
      * @param {number} [options.backgroundColor=0x000000] - The background color of the rendered area
      *  (shown if not transparent).
+     * @param {number} [options.backgroundAlpha=1] - Value from 0 (fully transparent) to 1 (fully opaque).
      */
     constructor(type: RENDERER_TYPE = RENDERER_TYPE.UNKNOWN, options?: IRendererOptions)
     {
@@ -91,13 +98,6 @@ export abstract class AbstractRenderer extends EventEmitter
 
         // Add the default render options
         options = Object.assign({}, settings.RENDER_OPTIONS, options);
-
-        // Deprecation notice for renderer roundPixels option
-        if ((options as IRendererOptionsLegacy).roundPixels)
-        {
-            settings.ROUND_PIXELS = (options as IRendererOptionsLegacy).roundPixels;
-            deprecation('5.0.0', 'Renderer roundPixels option is deprecated, please use PIXI.settings.ROUND_PIXELS', 2);
-        }
 
         /**
          * The supplied constructor options.
@@ -136,24 +136,24 @@ export abstract class AbstractRenderer extends EventEmitter
          * The resolution / device pixel ratio of the renderer.
          *
          * @member {number}
-         * @default 1
+         * @default PIXI.settings.RESOLUTION
          */
         this.resolution = options.resolution || settings.RESOLUTION;
 
         /**
-         * Whether the render view is transparent.
+         * Pass-thru setting for the the canvas' context `alpha` property. This is typically
+         * not something you need to fiddle with. If you want transparency, use `backgroundAlpha`.
          *
          * @member {boolean}
          */
-        this.transparent = options.transparent;
+        this.useContextAlpha = options.useContextAlpha;
 
         /**
          * Whether CSS dimensions of canvas view should be resized to screen dimensions automatically.
          *
          * @member {boolean}
          */
-        this.autoDensity = options.autoDensity || (options as IRendererOptionsLegacy).autoResize || false;
-        // autoResize is deprecated, provides fallback support
+        this.autoDensity = !!options.autoDensity;
 
         /**
          * The value of the preserveDrawingBuffer flag affects whether or not the contents of
@@ -184,12 +184,12 @@ export abstract class AbstractRenderer extends EventEmitter
         this._backgroundColor = 0x000000;
 
         /**
-         * The background color as an [R, G, B] array.
+         * The background color as an [R, G, B, A] array.
          *
          * @member {number[]}
          * @protected
          */
-        this._backgroundColorRgba = [0, 0, 0, 0];
+        this._backgroundColorRgba = [0, 0, 0, 1];
 
         /**
          * The background color as a string.
@@ -200,14 +200,17 @@ export abstract class AbstractRenderer extends EventEmitter
         this._backgroundColorString = '#000000';
 
         this.backgroundColor = options.backgroundColor || this._backgroundColor; // run bg color setter
+        this.backgroundAlpha = options.backgroundAlpha;
 
-        /**
-         * This temporary display object used as the parent of the currently being rendered item.
-         *
-         * @member {PIXI.DisplayObject}
-         * @protected
-         */
-        this._tempDisplayObjectParent = new TemporaryDisplayObject();
+        // @deprecated
+        if (options.transparent !== undefined)
+        {
+            // #if _DEBUG
+            deprecation('6.0.0', 'Option transparent is deprecated, please use backgroundAlpha instead.');
+            // #endif
+            this.useContextAlpha = options.transparent;
+            this.backgroundAlpha = options.transparent ? 0 : 1;
+        }
 
         /**
          * The last root object that the renderer tried to render.
@@ -215,7 +218,7 @@ export abstract class AbstractRenderer extends EventEmitter
          * @member {PIXI.DisplayObject}
          * @protected
          */
-        this._lastObjectRendered = this._tempDisplayObjectParent;
+        this._lastObjectRendered = null;
 
         /**
          * Collection of plugins.
@@ -267,8 +270,8 @@ export abstract class AbstractRenderer extends EventEmitter
      * Resizes the screen and canvas to the specified width and height.
      * Canvas dimensions are multiplied by resolution.
      *
-     * @param {number} screenWidth - The new width of the screen.
-     * @param {number} screenHeight - The new height of the screen.
+     * @param screenWidth - The new width of the screen.
+     * @param screenHeight - The new height of the screen.
      */
     resize(screenWidth: number, screenHeight: number): void
     {
@@ -298,17 +301,18 @@ export abstract class AbstractRenderer extends EventEmitter
      * Useful function that returns a texture of the display object that can then be used to create sprites
      * This can be quite useful if your displayObject is complicated and needs to be reused multiple times.
      *
-     * @param {PIXI.DisplayObject} displayObject - The displayObject the object will be generated from.
-     * @param {PIXI.SCALE_MODES} scaleMode - The scale mode of the texture.
-     * @param {number} resolution - The resolution / device pixel ratio of the texture being generated.
-     * @param {PIXI.Rectangle} [region] - The region of the displayObject, that shall be rendered,
+     * @param displayObject - The displayObject the object will be generated from.
+     * @param scaleMode - The scale mode of the texture.
+     * @param resolution - The resolution / device pixel ratio of the texture being generated.
+     * @param [region] - The region of the displayObject, that shall be rendered,
      *        if no region is specified, defaults to the local bounds of the displayObject.
-     * @return {PIXI.RenderTexture} A texture of the graphics object.
+     * @param multisample - The number of samples of the frame buffer.
+     * @return A texture of the graphics object.
      */
-    generateTexture(displayObject: DisplayObject,
-        scaleMode?: SCALE_MODES, resolution?: number, region?: Rectangle): RenderTexture
+    generateTexture(displayObject: IRenderableObject,
+        scaleMode?: SCALE_MODES, resolution?: number, region?: Rectangle, multisample?: MSAA_QUALITY): RenderTexture
     {
-        region = region || (displayObject as Container).getLocalBounds(null, true);
+        region = region || (displayObject as IRenderableContainer).getLocalBounds(null, true);
 
         // minimum texture size is 1x1, 0x0 will throw an error
         if (region.width === 0) region.width = 1;
@@ -320,23 +324,28 @@ export abstract class AbstractRenderer extends EventEmitter
                 height: region.height | 0,
                 scaleMode,
                 resolution,
+                multisample,
             });
 
         tempMatrix.tx = -region.x;
         tempMatrix.ty = -region.y;
 
-        this.render(displayObject, renderTexture, false, tempMatrix, !!displayObject.parent);
+        this.render(displayObject, {
+            renderTexture,
+            clear: false,
+            transform: tempMatrix,
+            skipUpdateTransform: !!displayObject.parent
+        });
 
         return renderTexture;
     }
 
-    abstract render(displayObject: DisplayObject, renderTexture?: RenderTexture,
-                    clear?: boolean, transform?: Matrix, skipUpdateTransform?: boolean): void;
+    abstract render(displayObject: IRenderableObject, options?: IRendererRenderOptions): void;
 
     /**
      * Removes everything from the renderer and optionally removes the Canvas DOM element.
      *
-     * @param {boolean} [removeView=false] - Removes the Canvas element from the DOM.
+     * @param [removeView=false] - Removes the Canvas element from the DOM.
      */
     destroy(removeView?: boolean): void
     {
@@ -376,10 +385,24 @@ export abstract class AbstractRenderer extends EventEmitter
         return this._backgroundColor;
     }
 
-    set backgroundColor(value) // eslint-disable-line require-jsdoc
+    set backgroundColor(value: number)
     {
         this._backgroundColor = value;
         this._backgroundColorString = hex2string(value);
         hex2rgb(value, this._backgroundColorRgba);
+    }
+
+    /**
+     * The background color alpha. Setting this to 0 will make the canvas transparent.
+     *
+     * @member {number}
+     */
+    get backgroundAlpha(): number
+    {
+        return this._backgroundColorRgba[3];
+    }
+    set backgroundAlpha(value: number)
+    {
+        this._backgroundColorRgba[3] = value;
     }
 }

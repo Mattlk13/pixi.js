@@ -1,7 +1,5 @@
-/**
+/*
  * Math classes and utilities mixed into PIXI namespace.
- *
- * @lends PIXI
  */
 
 import { Circle } from './shapes/Circle';
@@ -10,6 +8,7 @@ import { Polygon } from './shapes/Polygon';
 import { Rectangle } from './shapes/Rectangle';
 import { RoundedRectangle } from './shapes/RoundedRectangle';
 
+export * from './IPointData';
 export * from './IPoint';
 export * from './Point';
 export * from './ObservablePoint';
@@ -25,9 +24,8 @@ export { RoundedRectangle };
 
 export * from './const';
 
-/**
+/*
  * @description Complex shape type
- *
  */
 export type IShape = Circle | Ellipse | Polygon | Rectangle | RoundedRectangle;
 

@@ -1,3 +1,5 @@
+import { default as cssColorNames } from 'css-color-names';
+
 /**
  * Converts a hexadecimal color number to an [R, G, B] array of normalized floats (numbers from 0.0 to 1.0).
  *
@@ -6,7 +8,7 @@
  * @memberof PIXI.utils
  * @function hex2rgb
  * @param {number} hex - The hexadecimal number to convert
- * @param  {number[]} [out=[]] If supplied, this array will be used rather than returning a new one
+ * @param  {number[]} [out=[]] - If supplied, this array will be used rather than returning a new one
  * @return {number[]} An array representing the [R, G, B] of the color where all values are floats.
  */
 export function hex2rgb(hex: number, out: Array<number> | Float32Array = []): Array<number> | Float32Array
@@ -38,20 +40,30 @@ export function hex2string(hex: number): string
 }
 
 /**
- * Converts a hexadecimal string to a hexadecimal color number.
+ * Converts a string to a hexadecimal color number.
+ * It can handle:
+ *  hex strings starting with #: "#ffffff"
+ *  hex strings starting with 0x: "0xffffff"
+ *  hex strings without prefix: "ffffff"
+ *  css colors: "black"
  *
  * @example
  * PIXI.utils.string2hex("#ffffff"); // returns 0xffffff
  * @memberof PIXI.utils
  * @function string2hex
- * @param {string} The string color (e.g., `"#ffffff"`)
+ * @param {string} string - The string color (e.g., `"#ffffff"`)
  * @return {number} Number in hexadecimal.
  */
 export function string2hex(string: string): number
 {
-    if (typeof string === 'string' && string[0] === '#')
+    if (typeof string === 'string')
     {
-        string = string.substr(1);
+        string = (cssColorNames as {[key: string]: string})[string.toLowerCase()] || string;
+
+        if (string[0] === '#')
+        {
+            string = string.substr(1);
+        }
     }
 
     return parseInt(string, 16);

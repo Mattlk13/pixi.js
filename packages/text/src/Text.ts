@@ -23,7 +23,7 @@ const defaultDestroyOptions: IDestroyOptions = {
  *
  * The text is created using the [Canvas API](https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API).
  *
- * The primary advantage of this class over BitmapText is that you have great control over the style of the next,
+ * The primary advantage of this class over BitmapText is that you have great control over the style of the text,
  * which you can change at runtime.
  *
  * The primary disadvantages is that each piece of text has it's own texture, which can use more memory.
@@ -45,16 +45,29 @@ const defaultDestroyOptions: IDestroyOptions = {
  */
 export class Text extends Sprite
 {
+    /**
+     * New behavior for `lineHeight` that's meant to mimic HTML text. A value of `true` will
+     * make sure the first baseline is offset by the `lineHeight` value if it is greater than `fontSize`.
+     * A value of `false` will use the legacy behavior and not change the baseline of the first line.
+     * In the next major release, we'll enable this by default.
+     *
+     * @static
+     * @memberof PIXI.Text
+     * @member {boolean} nextLineHeightBehavior
+     * @default false
+     */
+    public static nextLineHeightBehavior = false;
+
     public canvas: HTMLCanvasElement;
     public context: CanvasRenderingContext2D;
     public localStyleID: number;
     public dirty: boolean;
 
+    _resolution: number;
+    _autoResolution: boolean;
     protected _text: string;
     protected _font: string;
     protected _style: TextStyle;
-    protected _resolution: number;
-    protected _autoResolution: boolean;
     protected _styleListener: () => void;
     private _ownCanvas: boolean;
 
@@ -63,7 +76,7 @@ export class Text extends Sprite
      * @param {object|PIXI.TextStyle} [style] - The style parameters
      * @param {HTMLCanvasElement} [canvas] - The canvas element for drawing text
      */
-    constructor(text: string, style: Partial<ITextStyle>|TextStyle, canvas: HTMLCanvasElement)
+    constructor(text: string, style?: Partial<ITextStyle>|TextStyle, canvas?: HTMLCanvasElement)
     {
         let ownCanvas = false;
 
@@ -111,7 +124,7 @@ export class Text extends Sprite
          * The resolution / device pixel ratio of the canvas.
          * This is set to automatically match the renderer resolution by default, but can be overridden by setting manually.
          * @member {number}
-         * @default 1
+         * @default PIXI.settings.RESOLUTION
          */
         this._resolution = settings.RESOLUTION;
         this._autoResolution = true;
@@ -189,8 +202,8 @@ export class Text extends Sprite
         const maxLineWidth = measured.maxLineWidth;
         const fontProperties = measured.fontProperties;
 
-        this.canvas.width = Math.ceil((Math.max(1, width) + (style.padding * 2)) * this._resolution);
-        this.canvas.height = Math.ceil((Math.max(1, height) + (style.padding * 2)) * this._resolution);
+        this.canvas.width = Math.ceil(Math.ceil((Math.max(1, width) + (style.padding * 2))) * this._resolution);
+        this.canvas.height = Math.ceil(Math.ceil((Math.max(1, height) + (style.padding * 2))) * this._resolution);
 
         context.scale(this._resolution, this._resolution);
 
@@ -222,8 +235,9 @@ export class Text extends Sprite
         for (let i = 0; i < passesCount; ++i)
         {
             const isShadowPass = style.dropShadow && i === 0;
-            const dsOffsetText = isShadowPass ? height * 2 : 0; // we only want the drop shadow, so put text way off-screen
-            const dsOffsetShadow = dsOffsetText * this.resolution;
+            // we only want the drop shadow, so put text way off-screen
+            const dsOffsetText = isShadowPass ? Math.ceil(Math.max(1, height) + (style.padding * 2)) : 0;
+            const dsOffsetShadow = dsOffsetText * this._resolution;
 
             if (isShadowPass)
             {
@@ -244,23 +258,31 @@ export class Text extends Sprite
             else
             {
                 // set canvas text styles
-                context.fillStyle = this._generateFillStyle(style, lines);
+                context.fillStyle = this._generateFillStyle(style, lines, measured);
                 // TODO: Can't have different types for getter and setter. The getter shouldn't have the number type as
                 //       the setter converts to string. See this thread for more details:
                 //       https://github.com/microsoft/TypeScript/issues/2521
                 context.strokeStyle = style.stroke as string;
 
-                context.shadowColor = '0';
+                context.shadowColor = 'black';
                 context.shadowBlur = 0;
                 context.shadowOffsetX = 0;
                 context.shadowOffsetY = 0;
+            }
+
+            let linePositionYShift = (lineHeight - fontProperties.fontSize) / 2;
+
+            if (!Text.nextLineHeightBehavior || lineHeight - fontProperties.fontSize < 0)
+            {
+                linePositionYShift = 0;
             }
 
             // draw lines line by line
             for (let i = 0; i < lines.length; i++)
             {
                 linePositionX = style.strokeThickness / 2;
-                linePositionY = ((style.strokeThickness / 2) + (i * lineHeight)) + fontProperties.ascent;
+                linePositionY = ((style.strokeThickness / 2) + (i * lineHeight)) + fontProperties.ascent
+                    + linePositionYShift;
 
                 if (style.align === 'right')
                 {
@@ -394,6 +416,9 @@ export class Text extends Sprite
 
         baseTexture.setRealSize(canvas.width, canvas.height, this._resolution);
 
+        // Recursively updates transform of all objects from the root to this one
+        this._recursivePostUpdateTransform();
+
         this.dirty = false;
     }
 
@@ -449,7 +474,7 @@ export class Text extends Sprite
      * @param {string[]} lines - The lines of text.
      * @return {string|number|CanvasGradient} The fill style
      */
-    private _generateFillStyle(style: TextStyle, lines: string[]): string|CanvasGradient|CanvasPattern
+    private _generateFillStyle(style: TextStyle, lines: string[], metrics: TextMetrics): string|CanvasGradient|CanvasPattern
     {
         // TODO: Can't have different types for getter and setter. The getter shouldn't have the number type as
         //       the setter converts to string. See this thread for more details:
@@ -468,9 +493,6 @@ export class Text extends Sprite
         // the gradient will be evenly spaced out according to how large the array is.
         // ['#FF0000', '#00FF00', '#0000FF'] would created stops at 0.25, 0.5 and 0.75
         let gradient: string[]|CanvasGradient;
-        let totalIterations: number;
-        let currentIteration: number;
-        let stop: number;
 
         // a dropshadow will enlarge the canvas and result in the gradient being
         // generated with the incorrect dimensions
@@ -479,9 +501,8 @@ export class Text extends Sprite
         // should also take padding into account, padding can offset the gradient
         const padding = style.padding || 0;
 
-        // only minus x1 padding here, not x2, as gradient creation is x1 y1 x2 y2, not x y width height
-        const width = Math.ceil(this.canvas.width / this._resolution) - dropShadowCorrection - padding;
-        const height = Math.ceil(this.canvas.height / this._resolution) - dropShadowCorrection - padding;
+        const width = Math.ceil(this.canvas.width / this._resolution) - dropShadowCorrection - (padding * 2);
+        const height = Math.ceil(this.canvas.height / this._resolution) - dropShadowCorrection - (padding * 2);
 
         // make a copy of the style settings, so we can manipulate them later
         const fill = fillStyle.slice();
@@ -509,55 +530,76 @@ export class Text extends Sprite
         if (style.fillGradientType === TEXT_GRADIENT.LINEAR_VERTICAL)
         {
             // start the gradient at the top center of the canvas, and end at the bottom middle of the canvas
-            gradient = this.context.createLinearGradient(width / 2, padding, width / 2, height);
+            gradient = this.context.createLinearGradient(width / 2, padding, width / 2, height + padding);
 
             // we need to repeat the gradient so that each individual line of text has the same vertical gradient effect
             // ['#FF0000', '#00FF00', '#0000FF'] over 2 lines would create stops at 0.125, 0.25, 0.375, 0.625, 0.75, 0.875
-            totalIterations = (fill.length + 1) * lines.length;
-            currentIteration = 0;
 
-            // There's potential for floating point precision issues at the seams between gradient repeats.
-            // The loop below generates the stops in order, so track the last generated one to prevent
-            // floating point precision from making us go the teeniest bit backwards, resulting in
-            // the first and last colors getting swapped.
-            let lastIterationStop = 0;
+            // Actual height of the text itself, not counting spacing for lineHeight/leading/dropShadow etc
+            const textHeight = metrics.fontProperties.fontSize + style.strokeThickness;
 
             for (let i = 0; i < lines.length; i++)
             {
-                currentIteration += 1;
+                const lastLineBottom = (metrics.lineHeight * (i - 1)) + textHeight;
+                const thisLineTop = metrics.lineHeight * i;
+                let thisLineGradientStart = thisLineTop;
+
+                // Handle case where last & this line overlap
+                if (i > 0 && lastLineBottom > thisLineTop)
+                {
+                    thisLineGradientStart = (thisLineTop + lastLineBottom) / 2;
+                }
+
+                const thisLineBottom = thisLineTop + textHeight;
+                const nextLineTop = metrics.lineHeight * (i + 1);
+                let thisLineGradientEnd = thisLineBottom;
+
+                // Handle case where this & next line overlap
+                if (i + 1 < lines.length && nextLineTop < thisLineBottom)
+                {
+                    thisLineGradientEnd = (thisLineBottom + nextLineTop) / 2;
+                }
+
+                // textHeight, but as a 0-1 size in global gradient stop space
+                const gradStopLineHeight = (thisLineGradientEnd - thisLineGradientStart) / height;
+
                 for (let j = 0; j < fill.length; j++)
                 {
+                    // 0-1 stop point for the current line, multiplied to global space afterwards
+                    let lineStop = 0;
+
                     if (typeof fillGradientStops[j] === 'number')
                     {
-                        stop = (fillGradientStops[j] / lines.length) + (i / lines.length);
+                        lineStop = fillGradientStops[j];
                     }
                     else
                     {
-                        stop = currentIteration / totalIterations;
+                        lineStop = j / fill.length;
                     }
 
-                    // Prevent color stop generation going backwards from floating point imprecision
-                    let clampedStop = Math.max(lastIterationStop, stop);
+                    let globalStop = Math.min(1, Math.max(0,
+                        (thisLineGradientStart / height) + (lineStop * gradStopLineHeight)));
 
-                    clampedStop = Math.min(clampedStop, 1); // Cap at 1 as well for safety's sake to avoid a possible throw.
-                    gradient.addColorStop(clampedStop, fill[j]);
-                    currentIteration++;
-                    lastIterationStop = clampedStop;
+                    // There's potential for floating point precision issues at the seams between gradient repeats.
+                    globalStop = Number(globalStop.toFixed(5));
+                    gradient.addColorStop(globalStop, fill[j]);
                 }
             }
         }
         else
         {
             // start the gradient at the center left of the canvas, and end at the center right of the canvas
-            gradient = this.context.createLinearGradient(padding, height / 2, width, height / 2);
+            gradient = this.context.createLinearGradient(padding, height / 2, width + padding, height / 2);
 
             // can just evenly space out the gradients in this case, as multiple lines makes no difference
             // to an even left to right gradient
-            totalIterations = fill.length + 1;
-            currentIteration = 1;
+            const totalIterations = fill.length + 1;
+            let currentIteration = 1;
 
             for (let i = 0; i < fill.length; i++)
             {
+                let stop: number;
+
                 if (typeof fillGradientStops[i] === 'number')
                 {
                     stop = fillGradientStops[i];
@@ -586,7 +628,7 @@ export class Text extends Sprite
      * @param {boolean} [options.texture=true] - Should it destroy the current texture of the sprite as well
      * @param {boolean} [options.baseTexture=true] - Should it destroy the base texture of the sprite as well
      */
-    public destroy(options: IDestroyOptions|boolean): void
+    public destroy(options?: IDestroyOptions|boolean): void
     {
         if (typeof options === 'boolean')
         {
@@ -623,7 +665,7 @@ export class Text extends Sprite
         return Math.abs(this.scale.x) * this._texture.orig.width;
     }
 
-    set width(value) // eslint-disable-line require-jsdoc
+    set width(value: number)
     {
         this.updateText(true);
 
@@ -645,7 +687,7 @@ export class Text extends Sprite
         return Math.abs(this.scale.y) * this._texture.orig.height;
     }
 
-    set height(value) // eslint-disable-line require-jsdoc
+    set height(value: number)
     {
         this.updateText(true);
 
@@ -669,7 +711,7 @@ export class Text extends Sprite
         return this._style;
     }
 
-    set style(style) // eslint-disable-line require-jsdoc
+    set style(style: TextStyle|Partial<ITextStyle>)
     {
         style = style || {};
 
@@ -696,7 +738,7 @@ export class Text extends Sprite
         return this._text;
     }
 
-    set text(text) // eslint-disable-line require-jsdoc
+    set text(text: string)
     {
         text = String(text === null || text === undefined ? '' : text);
 
@@ -719,7 +761,7 @@ export class Text extends Sprite
         return this._resolution;
     }
 
-    set resolution(value) // eslint-disable-line require-jsdoc
+    set resolution(value: number)
     {
         this._autoResolution = false;
 

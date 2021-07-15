@@ -1,10 +1,11 @@
 import { DEG_TO_RAD, Matrix, Point, RAD_TO_DEG, Rectangle, Transform } from '@pixi/math';
 import { EventEmitter } from '@pixi/utils';
-import { Container } from './Container';
 import { Bounds } from './Bounds';
 
+import type { Container } from './Container';
 import type { Filter, MaskData, Renderer } from '@pixi/core';
-import type { IPoint, ObservablePoint } from '@pixi/math';
+import type { IPointData, ObservablePoint } from '@pixi/math';
+import type { Dict } from '@pixi/utils';
 
 export interface IDestroyOptions {
     children?: boolean;
@@ -12,12 +13,191 @@ export interface IDestroyOptions {
     baseTexture?: boolean;
 }
 
-export interface DisplayObject extends GlobalMixins.DisplayObject, EventEmitter {}
+export interface DisplayObject extends Omit<GlobalMixins.DisplayObject, keyof EventEmitter>, EventEmitter {}
 
 /**
  * The base class for all objects that are rendered on the screen.
  *
- * This is an abstract class and should not be used on its own; rather it should b e extended.
+ * This is an abstract class and can not be used on its own; rather it should be extended.
+ *
+ * ## Display objects implemented in PixiJS
+ *
+ * | Display Object                  | Description                                                           |
+ * | ------------------------------- | --------------------------------------------------------------------- |
+ * | {@link PIXI.Container}          | Adds support for `children` to DisplayObject                          |
+ * | {@link PIXI.Graphics}           | Shape-drawing display object similar to the Canvas API                |
+ * | {@link PIXI.Sprite}             | Draws textures (i.e. images)                                          |
+ * | {@link PIXI.Text}               | Draws text using the Canvas API internally                            |
+ * | {@link PIXI.BitmapText}         | More scaleable solution for text rendering, reusing glyph textures    |
+ * | {@link PIXI.TilingSprite}       | Draws textures/images in a tiled fashion                              |
+ * | {@link PIXI.AnimatedSprite}     | Draws an animation of multiple images                                 |
+ * | {@link PIXI.Mesh}               | Provides a lower-level API for drawing meshes with custom data        |
+ * | {@link PIXI.NineSlicePlane}     | Mesh-related                                                          |
+ * | {@link PIXI.SimpleMesh}         | v4-compatibile mesh                                                   |
+ * | {@link PIXI.SimplePlane}        | Mesh-related                                                          |
+ * | {@link PIXI.SimpleRope}         | Mesh-related                                                          |
+ *
+ * ## Transforms
+ *
+ * The [transform]{@link DisplayObject#transform} of a display object describes the projection from its
+ * local coordinate space to its parent's local coordinate space. The following properties are derived
+ * from the transform:
+ *
+ * <table>
+ *   <thead>
+ *     <tr>
+ *       <th>Property</th>
+ *       <th>Description</th>
+ *     </tr>
+ *   </thead>
+ *   <tbody>
+ *     <tr>
+ *       <td>[pivot]{@link PIXI.DisplayObject#pivot}</td>
+ *       <td>
+ *         Invariant under rotation, scaling, and skewing. The projection of into the parent's space of the pivot
+ *         is equal to position, regardless of the other three transformations. In other words, It is the center of
+ *         rotation, scaling, and skewing.
+ *       </td>
+ *     </tr>
+ *     <tr>
+ *       <td>[position]{@link PIXI.DisplayObject#position}</td>
+ *       <td>
+ *         Translation. This is the position of the [pivot]{@link PIXI.DisplayObject#pivot} in the parent's local
+ *         space. The default value of the pivot is the origin (0,0). If the top-left corner of your display object
+ *         is (0,0) in its local space, then the position will be its top-left corner in the parent's local space.
+ *       </td>
+ *     </tr>
+ *     <tr>
+ *       <td>[scale]{@link PIXI.DisplayObject#scale}</td>
+ *       <td>
+ *         Scaling. This will stretch (or compress) the display object's projection. The scale factors are along the
+ *         local coordinate axes. In other words, the display object is scaled before rotated or skewed. The center
+ *         of scaling is the [pivot]{@link PIXI.DisplayObject#pivot}.
+ *       </td>
+ *     </tr>
+ *     <tr>
+ *       <td>[rotation]{@link PIXI.DisplayObject#rotation}</td>
+ *       <td>
+ *          Rotation. This will rotate the display object's projection by this angle (in radians).
+ *       </td>
+ *     </tr>
+ *     <tr>
+ *       <td>[skew]{@link PIXI.DisplayObject#skew}</td>
+ *       <td>
+ *         <p>Skewing. This can be used to deform a rectangular display object into a parallelogram.</p>
+ *         <p>
+ *         In PixiJS, skew has a slightly different behaviour than the conventional meaning. It can be
+ *         thought of the net rotation applied to the coordinate axes (separately). For example, if "skew.x" is
+ *         ⍺ and "skew.y" is β, then the line x = 0 will be rotated by ⍺ (y = -x*cot⍺) and the line y = 0 will be
+ *         rotated by β (y = x*tanβ). A line y = x*tanϴ (i.e. a line at angle ϴ to the x-axis in local-space) will
+ *         be rotated by an angle between ⍺ and β.
+ *         </p>
+ *         <p>
+ *         It can be observed that if skew is applied equally to both axes, then it will be equivalent to applying
+ *         a rotation. Indeed, if "skew.x" = -ϴ and "skew.y" = ϴ, it will produce an equivalent of "rotation" = ϴ.
+ *         </p>
+ *         <p>
+ *         Another quite interesting observation is that "skew.x", "skew.y", rotation are communtative operations. Indeed,
+ *         because rotation is essentially a careful combination of the two.
+ *         </p>
+ *       </td>
+ *     </tr>
+ *     <tr>
+ *       <td>angle</td>
+ *       <td>Rotation. This is an alias for [rotation]{@link PIXI.DisplayObject#rotation}, but in degrees.</td>
+ *     </tr>
+ *     <tr>
+ *       <td>x</td>
+ *       <td>Translation. This is an alias for position.x!</td>
+ *     </tr>
+ *     <tr>
+ *       <td>y</td>
+ *       <td>Translation. This is an alias for position.y!</td>
+ *     </tr>
+ *     <tr>
+ *       <td>width</td>
+ *       <td>
+ *         Implemented in [Container]{@link PIXI.Container}. Scaling. The width property calculates scale.x by dividing
+ *         the "requested" width by the local bounding box width. It is indirectly an abstraction over scale.x, and there
+ *         is no concept of user-defined width.
+ *       </td>
+ *     </tr>
+ *     <tr>
+ *       <td>height</td>
+ *       <td>
+ *         Implemented in [Container]{@link PIXI.Container}. Scaling. The height property calculates scale.y by dividing
+ *         the "requested" height by the local bounding box height. It is indirectly an abstraction over scale.y, and there
+ *         is no concept of user-defined height.
+ *       </td>
+ *     </tr>
+ *   </tbody>
+ * </table>
+ *
+ * ## Bounds
+ *
+ * The bounds of a display object is defined by the minimum axis-aligned rectangle in world space that can fit
+ * around it. The abstract `calculateBounds` method is responsible for providing it (and it should use the
+ * `worldTransform` to calculate in world space).
+ *
+ * There are a few additional types of bounding boxes:
+ *
+ * | Bounds                | Description                                                                              |
+ * | --------------------- | ---------------------------------------------------------------------------------------- |
+ * | World Bounds          | This is synonymous is the regular bounds described above. See `getBounds()`.             |
+ * | Local Bounds          | This the axis-aligned bounding box in the parent's local space. See `getLocalBounds()`.  |
+ * | Render Bounds         | The bounds, but including extra rendering effects like filter padding.                   |
+ * | Projected Bounds      | The bounds of the projected display object onto the screen. Usually equals world bounds. |
+ * | Relative Bounds       | The bounds of a display object when projected onto a ancestor's (or parent's) space.     |
+ * | Natural Bounds        | The bounds of an object in its own local space (not parent's space, like in local bounds)|
+ * | Content Bounds        | The natural bounds when excluding all children of a `Container`.                         |
+ *
+ * ### calculateBounds
+ *
+ * [Container]{@link Container} already implements `calculateBounds` in a manner that includes children.
+ *
+ * But for a non-Container display object, the `calculateBounds` method must be overridden in order for `getBounds` and
+ * `getLocalBounds` to work. This method must write the bounds into `this._bounds`.
+ *
+ * Generally, the following technique works for most simple cases: take the list of points
+ * forming the "hull" of the object (i.e. outline of the object's shape), and then add them
+ * using {@link PIXI.Bounds#addPointMatrix}.
+ *
+ * ```js
+ * calculateBounds(): void
+ * {
+ *     const points = [...];
+ *
+ *     for (let i = 0, j = points.length; i < j; i++)
+ *     {
+ *         this._bounds.addPointMatrix(this.worldTransform, points[i]);
+ *     }
+ * }
+ * ```
+ *
+ * You can optimize this for a large number of points by using {@link PIXI.Bounds#addVerticesMatrix} to pass them
+ * in one array together.
+ *
+ * ## Alpha
+ *
+ * This alpha sets a display object's **relative opacity** w.r.t its parent. For example, if the alpha of a display
+ * object is 0.5 and its parent's alpha is 0.5, then it will be rendered with 25% opacity (assuming alpha is not
+ * applied on any ancestor further up the chain).
+ *
+ * The alpha with which the display object will be rendered is called the [worldAlpha]{@link PIXI.DisplayObject#worldAlpha}.
+ *
+ * ## Renderable vs Visible
+ *
+ * The `renderable` and `visible` properties can be used to prevent a display object from being rendered to the
+ * screen. However, there is a subtle difference between the two. When using `renderable`, the transforms  of the display
+ * object (and its children subtree) will continue to be calculated. When using `visible`, the transforms will not
+ * be calculated.
+ *
+ * It is recommended that applications use the `renderable` property for culling. See
+ * [@pixi-essentials/cull]{@link https://www.npmjs.com/package/@pixi-essentials/cull} or
+ * [pixi-cull]{@link https://www.npmjs.com/package/pixi-cull} for more details.
+ *
+ * Otherwise, to prevent an object from rendering in the general-purpose sense - `visible` is the property to use. This
+ * one is also better in terms of performance.
  *
  * @class
  * @extends PIXI.utils.EventEmitter
@@ -27,14 +207,14 @@ export abstract class DisplayObject extends EventEmitter
 {
     abstract sortDirty: boolean;
 
-    public parent: DisplayObject;
+    public parent: Container;
     public worldAlpha: number;
     public transform: Transform;
     public alpha: number;
     public visible: boolean;
     public renderable: boolean;
     public filterArea: Rectangle;
-    public filters: Filter[];
+    public filters: Filter[] | null;
     public isSprite: boolean;
     public isMask: boolean;
     public _lastSortedIndex: number;
@@ -55,9 +235,9 @@ export abstract class DisplayObject extends EventEmitter
     /**
      * Mixes all enumerable properties and methods from a source object to DisplayObject.
      *
-     * @param {object} source The source of properties and methods to mix in.
+     * @param {object} source - The source of properties and methods to mix in.
      */
-    static mixin(source: {[x: string]: any}): void
+    static mixin(source: Dict<any>): void
     {
         // in ES8/ES2017, this would be really easy:
         // Object.defineProperties(DisplayObject.prototype, Object.getOwnPropertyDescriptors(source));
@@ -221,24 +401,10 @@ export abstract class DisplayObject extends EventEmitter
         /**
          * The original, cached mask of the object.
          *
-         * @member {PIXI.Graphics|PIXI.Sprite|null}
+         * @member {PIXI.Container|PIXI.MaskData|null}
          * @protected
          */
         this._mask = null;
-
-        /**
-         * Fired when this DisplayObject is added to a Container.
-         *
-         * @event PIXI.DisplayObject#added
-         * @param {PIXI.Container} container - The container added to.
-         */
-
-        /**
-         * Fired when this DisplayObject is removed from a Container.
-         *
-         * @event PIXI.DisplayObject#removed
-         * @param {PIXI.Container} container - The container removed from.
-         */
 
         /**
          * If the object has been destroyed via destroy(). If true, it should not be used.
@@ -262,6 +428,37 @@ export abstract class DisplayObject extends EventEmitter
     }
 
     /**
+     * Fired when this DisplayObject is added to a Container.
+     *
+     * @instance
+     * @event added
+     * @param {PIXI.Container} container - The container added to.
+     */
+
+    /**
+     * Fired when this DisplayObject is removed from a Container.
+     *
+     * @instance
+     * @event removed
+     * @param {PIXI.Container} container - The container removed from.
+     */
+
+    /**
+     * Fired when this DisplayObject is destroyed.
+     *
+     * @instance
+     * @event destroyed
+     */
+
+    /**
+     * Readonly flag for destroyed display objects.
+     */
+    get destroyed(): boolean
+    {
+        return this._destroyed;
+    }
+
+    /**
      * Recalculates the bounds of the display object.
      */
     abstract calculateBounds(): void;
@@ -279,7 +476,7 @@ export abstract class DisplayObject extends EventEmitter
      * Recursively updates transform of all objects from the root to this one
      * internal function for toLocal()
      */
-    private _recursivePostUpdateTransform(): void
+    protected _recursivePostUpdateTransform(): void
     {
         if (this.parent)
         {
@@ -307,13 +504,39 @@ export abstract class DisplayObject extends EventEmitter
     }
 
     /**
-     * Retrieves the bounds of the displayObject as a rectangle object.
+     * Calculates and returns the (world) bounds of the display object as a [Rectangle]{@link PIXI.Rectangle}.
+     *
+     * This method is expensive on containers with a large subtree (like the stage). This is because the bounds
+     * of a container depend on its children's bounds, which recursively causes all bounds in the subtree to
+     * be recalculated. The upside, however, is that calling `getBounds` once on a container will indeed update
+     * the bounds of all children (the whole subtree, in fact). This side effect should be exploited by using
+     * `displayObject._bounds.getRectangle()` when traversing through all the bounds in a scene graph. Otherwise,
+     * calling `getBounds` on each object in a subtree will cause the total cost to increase quadratically as
+     * its height increases.
+     *
+     * * The transforms of all objects in a container's **subtree** and of all **ancestors** are updated.
+     * * The world bounds of all display objects in a container's **subtree** will also be recalculated.
+     *
+     * The `_bounds` object stores the last calculation of the bounds. You can use to entirely skip bounds
+     * calculation if needed.
+     *
+     * ```js
+     * const lastCalculatedBounds = displayObject._bounds.getRectangle(optionalRect);
+     * ```
+     *
+     * Do know that usage of `getLocalBounds` can corrupt the `_bounds` of children (the whole subtree, actually). This
+     * is a known issue that has not been solved. See [getLocalBounds]{@link PIXI.DisplayObject#getLocalBounds} for more
+     * details.
+     *
+     * `getBounds` should be called with `skipUpdate` equal to `true` in a render() call. This is because the transforms
+     * are guaranteed to be update-to-date. In fact, recalculating inside a render() call may cause corruption in certain
+     * cases.
      *
      * @param {boolean} [skipUpdate] - Setting to `true` will stop the transforms of the scene graph from
      *  being updated. This means the calculation returned MAY be out of date BUT will give you a
      *  nice performance boost.
      * @param {PIXI.Rectangle} [rect] - Optional rectangle to store the result of the bounds calculation.
-     * @return {PIXI.Rectangle} The rectangular bounding area.
+     * @return {PIXI.Rectangle} The minimum axis-aligned rectangle in world space that fits around this object.
      */
     getBounds(skipUpdate?: boolean, rect?: Rectangle): Rectangle
     {
@@ -321,7 +544,7 @@ export abstract class DisplayObject extends EventEmitter
         {
             if (!this.parent)
             {
-                this.parent = this._tempDisplayObjectParent;
+                this.parent = this._tempDisplayObjectParent as Container;
                 this.updateTransform();
                 this.parent = null;
             }
@@ -399,13 +622,13 @@ export abstract class DisplayObject extends EventEmitter
     /**
      * Calculates the global position of the display object.
      *
-     * @param {PIXI.IPoint} position - The world origin to calculate from.
+     * @param {PIXI.IPointData} position - The world origin to calculate from.
      * @param {PIXI.Point} [point] - A Point object in which to store the value, optional
      *  (otherwise will create a new Point).
      * @param {boolean} [skipUpdate=false] - Should we skip the update transform.
      * @return {PIXI.Point} A point object representing the position of this object.
      */
-    toGlobal(position: IPoint, point?: Point, skipUpdate = false): Point
+    toGlobal<P extends IPointData = Point>(position: IPointData, point?: P, skipUpdate = false): P
     {
         if (!skipUpdate)
         {
@@ -416,7 +639,7 @@ export abstract class DisplayObject extends EventEmitter
             // this is mainly to avoid a parent check in the main loop. Every little helps for performance :)
             if (!this.parent)
             {
-                this.parent = this._tempDisplayObjectParent;
+                this.parent = this._tempDisplayObjectParent as Container;
                 this.displayObjectUpdateTransform();
                 this.parent = null;
             }
@@ -427,20 +650,20 @@ export abstract class DisplayObject extends EventEmitter
         }
 
         // don't need to update the lot
-        return this.worldTransform.apply(position, point);
+        return this.worldTransform.apply<P>(position, point);
     }
 
     /**
      * Calculates the local position of the display object relative to another point.
      *
-     * @param {PIXI.IPoint} position - The world origin to calculate from.
+     * @param {PIXI.IPointData} position - The world origin to calculate from.
      * @param {PIXI.DisplayObject} [from] - The DisplayObject to calculate the global position from.
      * @param {PIXI.Point} [point] - A Point object in which to store the value, optional
      *  (otherwise will create a new Point).
      * @param {boolean} [skipUpdate=false] - Should we skip the update transform
      * @return {PIXI.Point} A point object representing the position of this object
      */
-    toLocal(position: IPoint, from: DisplayObject, point?: Point, skipUpdate?: boolean): Point
+    toLocal<P extends IPointData = Point>(position: IPointData, from?: DisplayObject, point?: P, skipUpdate?: boolean): P
     {
         if (from)
         {
@@ -456,7 +679,7 @@ export abstract class DisplayObject extends EventEmitter
             // this is mainly to avoid a parent check in the main loop. Every little helps for performance :)
             if (!this.parent)
             {
-                this.parent = this._tempDisplayObjectParent;
+                this.parent = this._tempDisplayObjectParent as Container;
                 this.displayObjectUpdateTransform();
                 this.parent = null;
             }
@@ -467,7 +690,7 @@ export abstract class DisplayObject extends EventEmitter
         }
 
         // simply apply the matrix..
-        return this.worldTransform.applyInverse(position, point);
+        return this.worldTransform.applyInverse<P>(position, point);
     }
 
     /**
@@ -524,13 +747,13 @@ export abstract class DisplayObject extends EventEmitter
      * after calling `destroy()`.
      *
      */
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     destroy(_options?: IDestroyOptions|boolean): void
     {
         if (this.parent)
         {
             this.parent.removeChild(this);
         }
+        this.emit('destroyed');
         this.removeAllListeners();
         this.transform = null;
 
@@ -564,6 +787,36 @@ export abstract class DisplayObject extends EventEmitter
     }
 
     /**
+     * Used in Renderer, cacheAsBitmap and other places where you call an `updateTransform` on root
+     *
+     * ```
+     * const cacheParent = elem.enableTempParent();
+     * elem.updateTransform();
+     * elem.disableTempParent(cacheParent);
+     * ```
+     *
+     * @returns {PIXI.Container} current parent
+     */
+    enableTempParent(): Container
+    {
+        const myParent = this.parent;
+
+        this.parent = this._tempDisplayObjectParent as Container;
+
+        return myParent;
+    }
+
+    /**
+     * Pair method for `enableTempParent`
+     *
+     * @param {PIXI.Container} cacheParent - Actual parent of element
+     */
+    disableTempParent(cacheParent: Container): void
+    {
+        this.parent = cacheParent;
+    }
+
+    /**
      * The position of the displayObject on the x axis relative to the local coordinates of the parent.
      * An alias to position.x
      *
@@ -574,7 +827,7 @@ export abstract class DisplayObject extends EventEmitter
         return this.position.x;
     }
 
-    set x(value) // eslint-disable-line require-jsdoc
+    set x(value: number)
     {
         this.transform.position.x = value;
     }
@@ -590,7 +843,7 @@ export abstract class DisplayObject extends EventEmitter
         return this.position.y;
     }
 
-    set y(value) // eslint-disable-line require-jsdoc
+    set y(value: number)
     {
         this.transform.position.y = value;
     }
@@ -619,8 +872,8 @@ export abstract class DisplayObject extends EventEmitter
 
     /**
      * The coordinate of the object relative to the local coordinates of the parent.
-     * Assignment by value since pixi-v4.
      *
+     * @since PixiJS 4
      * @member {PIXI.ObservablePoint}
      */
     get position(): ObservablePoint
@@ -628,15 +881,17 @@ export abstract class DisplayObject extends EventEmitter
         return this.transform.position;
     }
 
-    set position(value) // eslint-disable-line require-jsdoc
+    set position(value: ObservablePoint)
     {
         this.transform.position.copyFrom(value);
     }
 
     /**
-     * The scale factor of the object.
-     * Assignment by value since pixi-v4.
+     * The scale factors of this object along the local coordinate axes.
      *
+     * The default scale is (1, 1).
+     *
+     * @since PixiJS 4
      * @member {PIXI.ObservablePoint}
      */
     get scale(): ObservablePoint
@@ -644,15 +899,18 @@ export abstract class DisplayObject extends EventEmitter
         return this.transform.scale;
     }
 
-    set scale(value) // eslint-disable-line require-jsdoc
+    set scale(value: ObservablePoint)
     {
         this.transform.scale.copyFrom(value);
     }
 
     /**
-     * The pivot point of the displayObject that it rotates around.
-     * Assignment by value since pixi-v4.
+     * The center of rotation, scaling, and skewing for this display object in its local space. The `position`
+     * is the projection of `pivot` in the parent's local space.
      *
+     * By default, the pivot is the origin (0, 0).
+     *
+     * @since PixiJS 4
      * @member {PIXI.ObservablePoint}
      */
     get pivot(): ObservablePoint
@@ -660,15 +918,15 @@ export abstract class DisplayObject extends EventEmitter
         return this.transform.pivot;
     }
 
-    set pivot(value) // eslint-disable-line require-jsdoc
+    set pivot(value: ObservablePoint)
     {
         this.transform.pivot.copyFrom(value);
     }
 
     /**
      * The skew factor for the object in radians.
-     * Assignment by value since pixi-v4.
      *
+     * @since PixiJS 4
      * @member {PIXI.ObservablePoint}
      */
     get skew(): ObservablePoint
@@ -676,7 +934,7 @@ export abstract class DisplayObject extends EventEmitter
         return this.transform.skew;
     }
 
-    set skew(value) // eslint-disable-line require-jsdoc
+    set skew(value: ObservablePoint)
     {
         this.transform.skew.copyFrom(value);
     }
@@ -692,7 +950,7 @@ export abstract class DisplayObject extends EventEmitter
         return this.transform.rotation;
     }
 
-    set rotation(value) // eslint-disable-line require-jsdoc
+    set rotation(value: number)
     {
         this.transform.rotation = value;
     }
@@ -708,25 +966,27 @@ export abstract class DisplayObject extends EventEmitter
         return this.transform.rotation * RAD_TO_DEG;
     }
 
-    set angle(value) // eslint-disable-line require-jsdoc
+    set angle(value: number)
     {
         this.transform.rotation = value * DEG_TO_RAD;
     }
 
     /**
      * The zIndex of the displayObject.
+     *
      * If a container has the sortableChildren property set to true, children will be automatically
      * sorted by zIndex value; a higher value will mean it will be moved towards the end of the array,
-     * and thus rendered on top of other displayObjects within the same container.
+     * and thus rendered on top of other display objects within the same container.
      *
      * @member {number}
+     * @see PIXI.Container#sortableChildren
      */
     get zIndex(): number
     {
         return this._zIndex;
     }
 
-    set zIndex(value) // eslint-disable-line require-jsdoc
+    set zIndex(value: number)
     {
         this._zIndex = value;
         if (this.parent)
@@ -765,6 +1025,7 @@ export abstract class DisplayObject extends EventEmitter
      * utilities shape clipping. To remove a mask, set this property to `null`.
      *
      * For sprite mask both alpha and red channel are used. Black mask is the same as transparent mask.
+     *
      * @example
      * const graphics = new PIXI.Graphics();
      * graphics.beginFill(0xFF3300);
@@ -773,16 +1034,16 @@ export abstract class DisplayObject extends EventEmitter
      *
      * const sprite = new PIXI.Sprite(texture);
      * sprite.mask = graphics;
-     * @todo At the moment, PIXI.CanvasRenderer doesn't support PIXI.Sprite as mask.
      *
-     * @member {PIXI.Container|PIXI.MaskData}
+     * @todo At the moment, PIXI.CanvasRenderer doesn't support PIXI.Sprite as mask.
+     * @member {PIXI.Container|PIXI.MaskData|null}
      */
-    get mask(): Container|MaskData
+    get mask(): Container|MaskData|null
     {
         return this._mask;
     }
 
-    set mask(value) // eslint-disable-line require-jsdoc
+    set mask(value: Container|MaskData|null)
     {
         if (this._mask)
         {
@@ -806,9 +1067,9 @@ export abstract class DisplayObject extends EventEmitter
 
 export class TemporaryDisplayObject extends DisplayObject
 {
-    calculateBounds: () => {} = null;
-    removeChild: (child: DisplayObject) => {} = null;
-    render: (renderer: Renderer) => {} = null;
+    calculateBounds: () => null;
+    removeChild: (child: DisplayObject) => null;
+    render: (renderer: Renderer) => null;
     sortDirty: boolean = null;
 }
 
@@ -817,6 +1078,6 @@ export class TemporaryDisplayObject extends DisplayObject
  * Will crash if there's no parent element.
  *
  * @memberof PIXI.DisplayObject#
- * @function displayObjectUpdateTransform
+ * @method displayObjectUpdateTransform
  */
 DisplayObject.prototype.displayObjectUpdateTransform = DisplayObject.prototype.updateTransform;

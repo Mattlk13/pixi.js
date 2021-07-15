@@ -1,15 +1,15 @@
-import { System } from '../System';
 import { GLBuffer } from './GLBuffer';
 import { ENV } from '@pixi/constants';
 import { settings } from '../settings';
 
+import type { ISystem } from '../ISystem';
 import type { DRAW_MODES } from '@pixi/constants';
 import type { Renderer } from '../Renderer';
 import type { IRenderingContext } from '../IRenderingContext';
 import type { Geometry } from './Geometry';
 import type { Shader } from '../shader/Shader';
 import type { Program } from '../shader/Program';
-import type { Buffer } from './Buffer';
+import type { Dict } from '@pixi/utils';
 
 const byteSizeMap: {[key: number]: number} = { 5126: 4, 5123: 2, 5121: 1 };
 
@@ -18,9 +18,9 @@ const byteSizeMap: {[key: number]: number} = { 5126: 4, 5123: 2, 5121: 1 };
  *
  * @class
  * @extends PIXI.System
- * @memberof PIXI.systems
+ * @memberof PIXI
  */
-export class GeometrySystem extends System
+export class GeometrySystem implements ISystem
 {
     public hasVao: boolean;
     public hasInstance: boolean;
@@ -32,14 +32,14 @@ export class GeometrySystem extends System
     protected _boundBuffer: GLBuffer;
     readonly managedGeometries: {[key: number]: Geometry};
     readonly managedBuffers: {[key: number]: Buffer};
+    private renderer: Renderer;
 
     /**
      * @param {PIXI.Renderer} renderer - The renderer this System works for.
      */
     constructor(renderer: Renderer)
     {
-        super(renderer);
-
+        this.renderer = renderer;
         this._activeGeometry = null;
         this._activeVao = null;
 
@@ -70,13 +70,6 @@ export class GeometrySystem extends System
          * @readonly
          */
         this.managedGeometries = {};
-
-        /**
-         * Cache for all buffers by id, used in case renderer gets destroyed or for profiling
-         * @member {object}
-         * @readonly
-         */
-        this.managedBuffers = {};
     }
 
     /**
@@ -92,7 +85,7 @@ export class GeometrySystem extends System
         this.CONTEXT_UID = this.renderer.CONTEXT_UID;
 
         // webgl2
-        if (!gl.createVertexArray)
+        if (context.webGLVersion !== 2)
         {
             // webgl 1!
             let nativeVaoExtension = this.renderer.context.extensions.vertexArrayObject;
@@ -127,7 +120,7 @@ export class GeometrySystem extends System
             }
         }
 
-        if (!gl.vertexAttribDivisor)
+        if (context.webGLVersion !== 2)
         {
             const instanceExt = gl.getExtension('ANGLE_instanced_arrays');
 
@@ -154,8 +147,8 @@ export class GeometrySystem extends System
     /**
      * Binds geometry so that is can be drawn. Creating a Vao if required
      *
-     * @param {PIXI.Geometry} geometry instance of geometry to bind
-     * @param {PIXI.Shader} [shader] instance of shader to use vao for
+     * @param {PIXI.Geometry} geometry - instance of geometry to bind
+     * @param {PIXI.Shader} [shader] - instance of shader to use vao for
      */
     bind(geometry?: Geometry, shader?: Shader): void
     {
@@ -168,15 +161,17 @@ export class GeometrySystem extends System
         // Still mulling over the best way to solve this one..
         // will likely need to modify the shader attribute locations at run time!
         let vaos = geometry.glVertexArrayObjects[this.CONTEXT_UID];
+        let incRefCount = false;
 
         if (!vaos)
         {
             this.managedGeometries[geometry.id] = geometry;
             geometry.disposeRunner.add(this);
             geometry.glVertexArrayObjects[this.CONTEXT_UID] = vaos = {};
+            incRefCount = true;
         }
 
-        const vao = vaos[shader.program.id] || this.initGeometryVao(geometry, shader.program);
+        const vao = vaos[shader.program.id] || this.initGeometryVao(geometry, shader, incRefCount);
 
         this._activeGeometry = geometry;
 
@@ -215,49 +210,19 @@ export class GeometrySystem extends System
     updateBuffers(): void
     {
         const geometry = this._activeGeometry;
-        const { gl } = this;
+
+        const bufferSystem = this.renderer.buffer;
 
         for (let i = 0; i < geometry.buffers.length; i++)
         {
             const buffer = geometry.buffers[i];
 
-            const glBuffer = buffer._glBuffers[this.CONTEXT_UID];
-
-            if (buffer._updateID !== glBuffer.updateID)
-            {
-                glBuffer.updateID = buffer._updateID;
-
-                // TODO can cache this on buffer! maybe added a getter / setter?
-                const type = buffer.index ? gl.ELEMENT_ARRAY_BUFFER : gl.ARRAY_BUFFER;
-
-                // TODO this could change if the VAO changes...
-                // need to come up with a better way to cache..
-                // if (this.boundBuffers[type] !== glBuffer)
-                // {
-                // this.boundBuffers[type] = glBuffer;
-                gl.bindBuffer(type, glBuffer.buffer);
-                // }
-
-                this._boundBuffer = glBuffer;
-
-                if (glBuffer.byteLength >= buffer.data.byteLength)
-                {
-                    // offset is always zero for now!
-                    gl.bufferSubData(type, 0, buffer.data);
-                }
-                else
-                {
-                    const drawType = buffer.static ? gl.STATIC_DRAW : gl.DYNAMIC_DRAW;
-
-                    glBuffer.byteLength = buffer.data.byteLength;
-                    gl.bufferData(type, buffer.data, drawType);
-                }
-            }
+            bufferSystem.update(buffer);
         }
     }
 
     /**
-     * Check compability between a geometry and a program
+     * Check compatibility between a geometry and a program
      * @protected
      * @param {PIXI.Geometry} geometry - Geometry instance
      * @param {PIXI.Program} program - Program instance
@@ -280,8 +245,8 @@ export class GeometrySystem extends System
     /**
      * Takes a geometry and program and generates a unique signature for them.
      *
-     * @param {PIXI.Geometry} geometry to get signature from
-     * @param {PIXI.Program} program to test geometry against
+     * @param {PIXI.Geometry} geometry - to get signature from
+     * @param {PIXI.Program} program - to test geometry against
      * @returns {String} Unique signature of the geometry and program
      * @protected
      */
@@ -305,18 +270,27 @@ export class GeometrySystem extends System
 
     /**
      * Creates or gets Vao with the same structure as the geometry and stores it on the geometry.
-     * If vao is created, it is bound automatically.
+     * If vao is created, it is bound automatically. We use a shader to infer what and how to set up the
+     * attribute locations.
      *
      * @protected
      * @param {PIXI.Geometry} geometry - Instance of geometry to to generate Vao for
-     * @param {PIXI.Program} program - Instance of program
+     * @param {PIXI.Shader} shader - Instance of the shader
+     * @param {boolean} [incRefCount=false] - Increment refCount of all geometry buffers
      */
-    protected initGeometryVao(geometry: Geometry, program: Program): WebGLVertexArrayObject
+    protected initGeometryVao(geometry: Geometry, shader: Shader, incRefCount = true): WebGLVertexArrayObject
     {
-        this.checkCompatibility(geometry, program);
-
         const gl = this.gl;
         const CONTEXT_UID = this.CONTEXT_UID;
+        const bufferSystem = this.renderer.buffer;
+        const program = shader.program;
+
+        if (!program.glPrograms[CONTEXT_UID])
+        {
+            this.renderer.shader.generateShader(shader);
+        }
+
+        this.checkCompatibility(geometry, program);
 
         const signature = this.getSignature(geometry, program);
 
@@ -334,8 +308,8 @@ export class GeometrySystem extends System
 
         const buffers = geometry.buffers;
         const attributes = geometry.attributes;
-        const tempStride: {[x: string]: number} = {};
-        const tempStart: {[x: string]: number} = {};
+        const tempStride: Dict<number> = {};
+        const tempStart: Dict<number> = {};
 
         for (const j in buffers)
         {
@@ -392,14 +366,12 @@ export class GeometrySystem extends System
         {
             const buffer = buffers[i];
 
-            if (!buffer._glBuffers[CONTEXT_UID])
-            {
-                buffer._glBuffers[CONTEXT_UID] = new GLBuffer(gl.createBuffer());
-                this.managedBuffers[buffer.id] = buffer;
-                buffer.disposeRunner.add(this);
-            }
+            bufferSystem.bind(buffer);
 
-            buffer._glBuffers[CONTEXT_UID].refCount++;
+            if (incRefCount)
+            {
+                buffer._glBuffers[CONTEXT_UID].refCount++;
+            }
         }
 
         // TODO - maybe make this a data object?
@@ -417,41 +389,9 @@ export class GeometrySystem extends System
     }
 
     /**
-     * Disposes buffer
-     * @param {PIXI.Buffer} buffer buffer with data
-     * @param {boolean} [contextLost=false] If context was lost, we suppress deleteVertexArray
-     */
-    disposeBuffer(buffer: Buffer, contextLost?: boolean): void
-    {
-        if (!this.managedBuffers[buffer.id])
-        {
-            return;
-        }
-
-        delete this.managedBuffers[buffer.id];
-
-        const glBuffer = buffer._glBuffers[this.CONTEXT_UID];
-        const gl = this.gl;
-
-        buffer.disposeRunner.remove(this);
-
-        if (!glBuffer)
-        {
-            return;
-        }
-
-        if (!contextLost)
-        {
-            gl.deleteBuffer(glBuffer.buffer);
-        }
-
-        delete buffer._glBuffers[this.CONTEXT_UID];
-    }
-
-    /**
      * Disposes geometry
-     * @param {PIXI.Geometry} geometry Geometry with buffers. Only VAO will be disposed
-     * @param {boolean} [contextLost=false] If context was lost, we suppress deleteVertexArray
+     * @param {PIXI.Geometry} geometry - Geometry with buffers. Only VAO will be disposed
+     * @param {boolean} [contextLost=false] - If context was lost, we suppress deleteVertexArray
      */
     disposeGeometry(geometry: Geometry, contextLost?: boolean): void
     {
@@ -465,6 +405,7 @@ export class GeometrySystem extends System
         const vaos = geometry.glVertexArrayObjects[this.CONTEXT_UID];
         const gl = this.gl;
         const buffers = geometry.buffers;
+        const bufferSystem = this.renderer?.buffer;
 
         geometry.disposeRunner.remove(this);
 
@@ -473,14 +414,24 @@ export class GeometrySystem extends System
             return;
         }
 
-        for (let i = 0; i < buffers.length; i++)
+        // bufferSystem may have already been destroyed..
+        // if this is the case, there is no need to destroy the geometry buffers...
+        // they already have been!
+        if (bufferSystem)
         {
-            const buf = buffers[i]._glBuffers[this.CONTEXT_UID];
-
-            buf.refCount--;
-            if (buf.refCount === 0 && !contextLost)
+            for (let i = 0; i < buffers.length; i++)
             {
-                this.disposeBuffer(buffers[i], contextLost);
+                const buf = buffers[i]._glBuffers[this.CONTEXT_UID];
+
+                // my be null as context may have changed right before the dispose is called
+                if (buf)
+                {
+                    buf.refCount--;
+                    if (buf.refCount === 0 && !contextLost)
+                    {
+                        bufferSystem.dispose(buffers[i], contextLost);
+                    }
+                }
             }
         }
 
@@ -506,21 +457,16 @@ export class GeometrySystem extends System
     }
 
     /**
-     * dispose all WebGL resources of all managed geometries and buffers
-     * @param {boolean} [contextLost=false] If context was lost, we suppress `gl.delete` calls
+     * dispose all WebGL resources of all managed geometries
+     * @param {boolean} [contextLost=false] - If context was lost, we suppress `gl.delete` calls
      */
     disposeAll(contextLost?: boolean): void
     {
-        let all: Array<any> = Object.keys(this.managedGeometries);
+        const all: Array<any> = Object.keys(this.managedGeometries);
 
         for (let i = 0; i < all.length; i++)
         {
             this.disposeGeometry(this.managedGeometries[all[i]], contextLost);
-        }
-        all = Object.keys(this.managedBuffers);
-        for (let i = 0; i < all.length; i++)
-        {
-            this.disposeBuffer(this.managedBuffers[all[i]], contextLost);
         }
     }
 
@@ -535,13 +481,14 @@ export class GeometrySystem extends System
     {
         const gl = this.gl;
         const CONTEXT_UID = this.CONTEXT_UID;
+        const bufferSystem = this.renderer.buffer;
         const buffers = geometry.buffers;
         const attributes = geometry.attributes;
 
         if (geometry.indexBuffer)
         {
             // first update the index buffer if we have one..
-            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, geometry.indexBuffer._glBuffers[CONTEXT_UID].buffer);
+            bufferSystem.bind(geometry.indexBuffer);
         }
 
         let lastBuffer = null;
@@ -557,7 +504,7 @@ export class GeometrySystem extends System
             {
                 if (lastBuffer !== glBuffer)
                 {
-                    gl.bindBuffer(gl.ARRAY_BUFFER, glBuffer.buffer);
+                    bufferSystem.bind(buffer);
 
                     lastBuffer = glBuffer;
                 }
@@ -653,5 +600,13 @@ export class GeometrySystem extends System
         this.gl.bindVertexArray(null);
         this._activeVao = null;
         this._activeGeometry = null;
+    }
+
+    /**
+     * @ignore
+     */
+    destroy(): void
+    {
+        this.renderer = null;
     }
 }

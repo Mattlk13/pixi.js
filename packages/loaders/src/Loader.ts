@@ -2,6 +2,7 @@ import { Loader as ResourceLoader, middleware } from 'resource-loader';
 import { TextureLoader } from './TextureLoader';
 
 import type { Resource } from 'resource-loader';
+import type { ILoaderResource } from './LoaderResource';
 
 /**
  * The new loader, extends Resource Loader by Chad Engler: https://github.com/englercj/resource-loader
@@ -51,8 +52,6 @@ import type { Resource } from 'resource-loader';
  *
  * @class Loader
  * @memberof PIXI
- * @param {string} [baseUrl=''] - The base url for all resources loaded by this loader.
- * @param {number} [concurrency=10] - The number of resources to load concurrently.
  */
 export class Loader extends ResourceLoader
 {
@@ -68,6 +67,13 @@ export class Loader extends ResourceLoader
     private static _shared: Loader;
     private _protected: boolean;
 
+    /** All the resources for this loader by name. */
+    public readonly resources: {[name: string]: ILoaderResource};
+
+    /**
+     * @param {string} [baseUrl=''] - The base url for all resources loaded by this loader.
+     * @param {number} [concurrency=10] - The number of resources to load concurrently.
+     */
     constructor(baseUrl?: string, concurrency?: number)
     {
         super(baseUrl, concurrency);
@@ -200,45 +206,51 @@ export interface ILoaderPlugin {
 
 /**
  * @memberof PIXI.Loader
- * @typedef ILoaderSignal
+ * @typedef {object} ILoaderSignal
  * @property {ISignalCallback} add - Register callback
  * @property {ISignalCallback} once - Register oneshot callback
  * @property {ISignalDetach} detach - Detach specific callback by ID
  */
 
 /**
+ * Callback
  * @memberof PIXI.Loader
- * @callback loaderMiddleware
+ * @typedef {function} loaderMiddleware
  * @param {PIXI.LoaderResource} resource
  * @param {function} next
  */
 
 /**
+ * Dispatched when the loader begins to loading process.
+ * @name onStart
  * @memberof PIXI.Loader#
- * @description Dispatched when the loader begins to loading process.
- * @member {PIXI.Loader.ILoaderSignal} onStart
+ * @member {PIXI.Loader.ILoaderSignal}
  */
 
 /**
+ * Dispatched once per loaded or errored resource.
+ * @name onProgress
  * @memberof PIXI.Loader#
- * @description Dispatched once per loaded or errored resource.
  * @member {PIXI.Loader.ILoaderSignal} onProgress
  */
 
 /**
+ * Dispatched once per errored resource.
+ * @name onError
  * @memberof PIXI.Loader#
- * @description Dispatched once per errored resource.
- * @member {PIXI.Loader.ILoaderSignal} onError
+ * @member {PIXI.Loader.ILoaderSignal}
  */
 
 /**
+ * Dispatched once per loaded resource.
+ * @name onLoad
  * @memberof PIXI.Loader#
- * @description Dispatched once per loaded resource.
- * @member {PIXI.Loader.ILoaderSignal} onLoad
+ * @member {PIXI.Loader.ILoaderSignal}
  */
 
 /**
+ * Dispatched when completely loaded all resources.
+ * @name onComplete
  * @memberof PIXI.Loader#
- * @description Dispatched when completely loaded all resources.
- * @member {PIXI.Loader.ILoaderSignal} onComplete
+ * @member {PIXI.Loader.ILoaderSignal}
  */

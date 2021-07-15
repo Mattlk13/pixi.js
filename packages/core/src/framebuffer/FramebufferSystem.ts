@@ -1,10 +1,10 @@
-import { System } from '../System';
 import { Rectangle } from '@pixi/math';
 import { ENV, BUFFER_BITS, MSAA_QUALITY } from '@pixi/constants';
 import { settings } from '../settings';
 import { Framebuffer } from './Framebuffer';
 import { GLFramebuffer } from './GLFramebuffer';
 
+import type { ISystem } from '../ISystem';
 import type { Renderer } from '../Renderer';
 import type { IRenderingContext } from '../IRenderingContext';
 
@@ -15,9 +15,9 @@ const tempRectangle = new Rectangle();
  *
  * @class
  * @extends PIXI.System
- * @memberof PIXI.systems
+ * @memberof PIXI
  */
-export class FramebufferSystem extends System
+export class FramebufferSystem implements ISystem
 {
     public readonly managedFramebuffers: Array<Framebuffer>;
     public current: Framebuffer;
@@ -28,13 +28,14 @@ export class FramebufferSystem extends System
     protected gl: IRenderingContext;
     protected unknownFramebuffer: Framebuffer;
     protected msaaSamples: Array<number>;
+    public renderer: Renderer;
 
     /**
      * @param {PIXI.Renderer} renderer - The renderer this System works for.
      */
     constructor(renderer: Renderer)
     {
-        super(renderer);
+        this.renderer = renderer;
 
         /**
          * A list of managed framebuffers
@@ -111,10 +112,11 @@ export class FramebufferSystem extends System
     /**
      * Bind a framebuffer
      *
-     * @param {PIXI.Framebuffer} framebuffer
-     * @param {PIXI.Rectangle} [frame] frame, default is framebuffer size
+     * @param {PIXI.Framebuffer} [framebuffer]
+     * @param {PIXI.Rectangle} [frame] - frame, default is framebuffer size
+     * @param {number} [mipLevel] - optional mip level to set on the framebuffer - defaults to 0
      */
-    bind(framebuffer?: Framebuffer, frame?: Rectangle): void
+    bind(framebuffer?: Framebuffer, frame?: Rectangle, mipLevel = 0): void
     {
         const { gl } = this;
 
@@ -131,6 +133,13 @@ export class FramebufferSystem extends System
             }
             // make sure all textures are unbound..
 
+            if (fbo.mipLevel !== mipLevel)
+            {
+                framebuffer.dirtyId++;
+                framebuffer.dirtyFormat++;
+                fbo.mipLevel = mipLevel;
+            }
+
             // now check for updates...
             if (fbo.dirtyId !== framebuffer.dirtyId)
             {
@@ -139,7 +148,7 @@ export class FramebufferSystem extends System
                 if (fbo.dirtyFormat !== framebuffer.dirtyFormat)
                 {
                     fbo.dirtyFormat = framebuffer.dirtyFormat;
-                    this.updateFramebuffer(framebuffer);
+                    this.updateFramebuffer(framebuffer, mipLevel);
                 }
                 else if (fbo.dirtySize !== framebuffer.dirtySize)
                 {
@@ -150,14 +159,9 @@ export class FramebufferSystem extends System
 
             for (let i = 0; i < framebuffer.colorTextures.length; i++)
             {
-                if ((framebuffer.colorTextures[i] as any).texturePart)
-                {
-                    this.renderer.texture.unbind(framebuffer.colorTextures[i]);
-                }
-                else
-                {
-                    this.renderer.texture.unbind(framebuffer.colorTextures[i]);
-                }
+                const tex = framebuffer.colorTextures[i];
+
+                this.renderer.texture.unbind(tex.parentTextureArray || tex);
             }
 
             if (framebuffer.depthTexture)
@@ -167,11 +171,24 @@ export class FramebufferSystem extends System
 
             if (frame)
             {
-                this.setViewport(frame.x, frame.y, frame.width, frame.height);
+                const mipWidth = (frame.width >> mipLevel);
+                const mipHeight = (frame.height >> mipLevel);
+
+                const scale = mipWidth / frame.width;
+
+                this.setViewport(
+                    frame.x * scale,
+                    frame.y * scale,
+                    mipWidth,
+                    mipHeight
+                );
             }
             else
             {
-                this.setViewport(0, 0, framebuffer.width, framebuffer.height);
+                const mipWidth = (framebuffer.width >> mipLevel);
+                const mipHeight = (framebuffer.height >> mipLevel);
+
+                this.setViewport(0, 0, mipWidth, mipHeight);
             }
         }
         else
@@ -204,6 +221,11 @@ export class FramebufferSystem extends System
     setViewport(x: number, y: number, width: number, height: number): void
     {
         const v = this.viewport;
+
+        x = Math.round(x);
+        y = Math.round(y);
+        width = Math.round(width);
+        height = Math.round(height);
 
         if (v.width !== width || v.height !== height || v.x !== x || v.y !== y)
         {
@@ -309,8 +331,9 @@ export class FramebufferSystem extends System
      *
      * @protected
      * @param {PIXI.Framebuffer} framebuffer
+     * @param {number} mipLevel
      */
-    updateFramebuffer(framebuffer: Framebuffer): void
+    updateFramebuffer(framebuffer: Framebuffer, mipLevel: number): void
     {
         const { gl } = this;
 
@@ -345,28 +368,15 @@ export class FramebufferSystem extends System
             }
 
             const texture = framebuffer.colorTextures[i];
+            const parentTexture = texture.parentTextureArray || texture;
 
-            if ((texture as any).texturePart)
-            {
-                // @popelyshev: make an example, I'm not sure that this part works at all
-                this.renderer.texture.bind(texture, 0);
+            this.renderer.texture.bind(parentTexture, 0);
 
-                gl.framebufferTexture2D(gl.FRAMEBUFFER,
-                    gl.COLOR_ATTACHMENT0 + i,
-                    gl.TEXTURE_CUBE_MAP_NEGATIVE_X + (texture as any).side,
-                    texture._glTextures[this.CONTEXT_UID].texture,
-                    0);
-            }
-            else
-            {
-                this.renderer.texture.bind(texture, 0);
-
-                gl.framebufferTexture2D(gl.FRAMEBUFFER,
-                    gl.COLOR_ATTACHMENT0 + i,
-                    gl.TEXTURE_2D,
-                    texture._glTextures[this.CONTEXT_UID].texture,
-                    0);
-            }
+            gl.framebufferTexture2D(gl.FRAMEBUFFER,
+                gl.COLOR_ATTACHMENT0 + i,
+                texture.target,
+                parentTexture._glTextures[this.CONTEXT_UID].texture,
+                mipLevel);
 
             activeTextures.push(gl.COLOR_ATTACHMENT0 + i);
         }
@@ -390,7 +400,7 @@ export class FramebufferSystem extends System
                     gl.DEPTH_ATTACHMENT,
                     gl.TEXTURE_2D,
                     depthTexture._glTextures[this.CONTEXT_UID].texture,
-                    0);
+                    mipLevel);
             }
         }
 
@@ -412,8 +422,8 @@ export class FramebufferSystem extends System
     /**
      * Detects number of samples that is not more than a param but as close to it as possible
      *
-     * @param {PIXI.MSAA_QUALITY} samples number of samples
-     * @returns {PIXI.MSAA_QUALITY} recommended number of samples
+     * @param {PIXI.MSAA_QUALITY} samples - number of samples
+     * @returns {PIXI.MSAA_QUALITY} - recommended number of samples
      */
     protected detectSamples(samples: MSAA_QUALITY): MSAA_QUALITY
     {
@@ -449,9 +459,9 @@ export class FramebufferSystem extends System
      *
      * Fails with WebGL warning if blits multisample framebuffer to different size
      *
-     * @param {PIXI.Framebuffer} [framebuffer] by default it blits "into itself", from renderBuffer to texture.
-     * @param {PIXI.Rectangle} [sourcePixels] source rectangle in pixels
-     * @param {PIXI.Rectangle} [destPixels] dest rectangle in pixels, assumed to be the same as sourcePixels
+     * @param {PIXI.Framebuffer} [framebuffer] - by default it blits "into itself", from renderBuffer to texture.
+     * @param {PIXI.Rectangle} [sourcePixels] - source rectangle in pixels
+     * @param {PIXI.Rectangle} [destPixels] - dest rectangle in pixels, assumed to be the same as sourcePixels
      */
     public blit(framebuffer?: Framebuffer, sourcePixels?: Rectangle, destPixels?: Rectangle): void
     {
@@ -511,8 +521,8 @@ export class FramebufferSystem extends System
 
     /**
      * Disposes framebuffer
-     * @param {PIXI.Framebuffer} framebuffer framebuffer that has to be disposed of
-     * @param {boolean} [contextLost=false] If context was lost, we suppress all delete function calls
+     * @param {PIXI.Framebuffer} framebuffer - framebuffer that has to be disposed of
+     * @param {boolean} [contextLost=false] - If context was lost, we suppress all delete function calls
      */
     disposeFramebuffer(framebuffer: Framebuffer, contextLost?: boolean): void
     {
@@ -538,6 +548,7 @@ export class FramebufferSystem extends System
         if (!contextLost)
         {
             gl.deleteFramebuffer(fbo.framebuffer);
+
             if (fbo.stencil)
             {
                 gl.deleteRenderbuffer(fbo.stencil);
@@ -547,7 +558,7 @@ export class FramebufferSystem extends System
 
     /**
      * Disposes all framebuffers, but not textures bound to them
-     * @param {boolean} [contextLost=false] If context was lost, we suppress all delete function calls
+     * @param {boolean} [contextLost=false] - If context was lost, we suppress all delete function calls
      */
     disposeAll(contextLost?: boolean): void
     {
@@ -607,5 +618,13 @@ export class FramebufferSystem extends System
     {
         this.current = this.unknownFramebuffer;
         this.viewport = new Rectangle();
+    }
+
+    /**
+     * @ignore
+     */
+    destroy(): void
+    {
+        this.renderer = null;
     }
 }

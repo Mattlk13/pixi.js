@@ -17,8 +17,8 @@ export interface IImageResourceOptions
 /**
  * Resource type for HTMLImageElement.
  * @class
- * @extends PIXI.resources.BaseImageResource
- * @memberof PIXI.resources
+ * @extends PIXI.BaseImageResource
+ * @memberof PIXI
  */
 export class ImageResource extends BaseImageResource
 {
@@ -31,8 +31,9 @@ export class ImageResource extends BaseImageResource
     bitmap: ImageBitmap;
     /**
      * @param {HTMLImageElement|string} source - image source or URL
-     * @param {boolean} [options.autoLoad=true] start loading process
-     * @param {boolean} [options.createBitmap=PIXI.settings.CREATE_IMAGE_BITMAP] whether its required to create
+     * @param {object} [options]
+     * @param {boolean} [options.autoLoad=true] - start loading process
+     * @param {boolean} [options.createBitmap=PIXI.settings.CREATE_IMAGE_BITMAP] - whether its required to create
      *        a bitmap before upload
      * @param {boolean} [options.crossorigin=true] - Load image using cross origin
      * @param {PIXI.ALPHA_MODES} [options.alphaMode=PIXI.ALPHA_MODES.UNPACK] - Premultiply image alpha in bitmap
@@ -89,7 +90,7 @@ export class ImageResource extends BaseImageResource
          * @default PIXI.settings.CREATE_IMAGE_BITMAP
          */
         this.createBitmap = (options.createBitmap !== undefined
-            ? options.createBitmap : settings.CREATE_IMAGE_BITMAP) && !!window.createImageBitmap;
+            ? options.createBitmap : settings.CREATE_IMAGE_BITMAP) && !!self.createImageBitmap;
 
         /**
          * Controls texture alphaMode field
@@ -100,12 +101,6 @@ export class ImageResource extends BaseImageResource
          * @readonly
          */
         this.alphaMode = typeof options.alphaMode === 'number' ? options.alphaMode : null;
-
-        if ((options as any).premultiplyAlpha !== undefined)
-        {
-            // triggers deprecation
-            (this as any).premultiplyAlpha = (options as any).premultiplyAlpha;
-        }
 
         /**
          * The ImageBitmap element created for HTMLImageElement
@@ -131,7 +126,7 @@ export class ImageResource extends BaseImageResource
     /**
      * returns a promise when image will be loaded and processed
      *
-     * @param {boolean} [createBitmap] whether process image into bitmap
+     * @param {boolean} [createBitmap] - whether process image into bitmap
      * @returns {Promise<void>}
      */
     load(createBitmap?: boolean): Promise<ImageResource>
@@ -207,16 +202,24 @@ export class ImageResource extends BaseImageResource
         {
             return this._process;
         }
-        if (this.bitmap !== null || !window.createImageBitmap)
+        if (this.bitmap !== null || !self.createImageBitmap)
         {
             return Promise.resolve(this);
         }
 
-        this._process = (window.createImageBitmap as any)(source,
-            0, 0, source.width, source.height,
+        const createImageBitmap = self.createImageBitmap as any;
+        const cors = !source.crossOrigin || source.crossOrigin === 'anonymous';
+
+        this._process = fetch(source.src,
             {
-                premultiplyAlpha: this.alphaMode === ALPHA_MODES.UNPACK ? 'premultiply' : 'none',
+                mode: cors ? 'cors' : 'no-cors'
             })
+            .then((r) => r.blob())
+            .then((blob) => createImageBitmap(blob,
+                0, 0, source.width, source.height,
+                {
+                    premultiplyAlpha: this.alphaMode === ALPHA_MODES.UNPACK ? 'premultiply' : 'none',
+                }))
             .then((bitmap: ImageBitmap) =>
             {
                 if (this.destroyed)
@@ -317,5 +320,17 @@ export class ImageResource extends BaseImageResource
         }
         this._process = null;
         this._load = null;
+    }
+
+    /**
+     * Used to auto-detect the type of resource.
+     *
+     * @static
+     * @param {string|HTMLImageElement} source - The source object
+     * @return {boolean} `true` if source is string or HTMLImageElement
+     */
+    static test(source: unknown): source is string|HTMLImageElement
+    {
+        return typeof source === 'string' || source instanceof HTMLImageElement;
     }
 }

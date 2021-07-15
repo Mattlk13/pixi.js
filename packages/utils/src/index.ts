@@ -24,7 +24,7 @@
  *
  * @memberof PIXI.utils
  * @name isMobile
- * @type {Object}
+ * @member {Object}
  * @property {boolean} any - `true` if current platform is tablet or phone device
  * @property {boolean} tablet - `true` if current platform large-screen tablet device
  * @property {boolean} phone - `true` if current platform small-screen phone device
@@ -48,23 +48,7 @@
  */
 export { isMobile } from '@pixi/settings';
 
-/* eslint-disable */
-/*
-    - `eventemitter3` uses CommonJS export
-    - PIXI uses module exports, but thanks to `"esModuleInterop": true` in tsconfig.json this works
-    - Unfortunately `tsconfig.docs.json` (used for documentation genereation) exports to ES6
-      which for reasons unknown just doesn't work even with the interop above
-    - Changing docs' export to ES5 fixes the problem with `eventemitter3` but causes a lot
-      of other bugs when building for docs, therefore it's not a solution
-    - Adding @ts-ignore to this line makes docs build stop complaining about something it doesn't
-      have to care about, but then linter's rule is broken
-    - Therefore the whole thing is wrapped in eslint-disable just to be able to progress with this change
-    - This is a temporary measure. Possibly the best solution would be custom typings for `eventemitter3`
-    stored in this very repository.
- */
-// @ts-ignore
 import EventEmitter from 'eventemitter3';
-/* eslint-enable */
 
 /**
  * A high performance event emitter
@@ -73,7 +57,6 @@ import EventEmitter from 'eventemitter3';
  *
  * @memberof PIXI.utils
  * @class EventEmitter
- * @type {EventEmitter}
  */
 export { EventEmitter };
 
@@ -83,10 +66,10 @@ export { EventEmitter };
  * @see {@link https://github.com/mapbox/earcut}
  *
  * @memberof PIXI.utils
- * @function earcut
+ * @method earcut
  * @param {number[]} vertices - A flat array of vertex coordinates
  * @param {number[]} [holes] - An array of hole indices
- * @param {number} [dimensions=2] The number of coordinates per vertex in the input array
+ * @param {number} [dimensions=2] - The number of coordinates per vertex in the input array
  * @return {number[]} Triangulated polygon
  */
 export { default as earcut } from 'earcut';
@@ -98,9 +81,9 @@ export { default as earcut } from 'earcut';
  *
  * @memberof PIXI.utils
  * @name url
- * @type {object}
+ * @member {object}
  */
-export { default as url } from 'url';
+export * from './url';
 
 import './settings';
 

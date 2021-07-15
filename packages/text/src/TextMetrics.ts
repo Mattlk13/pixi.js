@@ -34,6 +34,7 @@ export class TextMetrics
     public static METRICS_STRING: string;
     public static BASELINE_SYMBOL: string;
     public static BASELINE_MULTIPLIER: number;
+    public static HEIGHT_MULTIPLIER: number;
 
     // TODO: These should be protected but they're initialized outside of the class.
     public static _canvas: HTMLCanvasElement|OffscreenCanvas;
@@ -129,7 +130,7 @@ export class TextMetrics
      * @param {HTMLCanvasElement} [canvas] - optional specification of the canvas to use for measuring.
      * @return {PIXI.TextMetrics} measured width and height of the text.
      */
-    public static measureText(text: string, style: TextStyle, wordWrap: boolean, canvas = TextMetrics._canvas): TextMetrics
+    public static measureText(text: string, style: TextStyle, wordWrap?: boolean, canvas = TextMetrics._canvas): TextMetrics
     {
         wordWrap = (wordWrap === undefined || wordWrap === null) ? style.wordWrap : wordWrap;
         const font = style.toFontString();
@@ -139,8 +140,8 @@ export class TextMetrics
         // (toDataURI, getImageData functions)
         if (fontProperties.fontSize === 0)
         {
-            fontProperties.fontSize = style.fontSize;
-            fontProperties.ascent = style.fontSize;
+            fontProperties.fontSize = style.fontSize as number;
+            fontProperties.ascent = style.fontSize as number;
         }
 
         const context = canvas.getContext('2d');
@@ -206,7 +207,7 @@ export class TextMetrics
         let line = '';
         let lines = '';
 
-        const cache: CharacterWidthCache = {};
+        const cache: CharacterWidthCache = Object.create(null);
         const { letterSpacing, whiteSpace } = style;
 
         // How to handle whitespaces
@@ -392,7 +393,7 @@ export class TextMetrics
      * @private
      * @param  {string}   line        - The line of text to add
      * @param  {boolean}  newLine     - Add new line character to end
-     * @return {string}   A formatted line
+     * @return {string}  A formatted line
      */
     private static addLine(line: string, newLine = true): string
     {
@@ -407,10 +408,10 @@ export class TextMetrics
      * Gets & sets the widths of calculated characters in a cache object
      *
      * @private
-     * @param  {string}                    key            The key
-     * @param  {number}                    letterSpacing  The letter spacing
-     * @param  {object}                    cache          The cache
-     * @param  {CanvasRenderingContext2D}  context        The canvas context
+     * @param  {string}                    key            - The key
+     * @param  {number}                    letterSpacing  - The letter spacing
+     * @param  {object}                    cache          - The cache
+     * @param  {CanvasRenderingContext2D}  context        - The canvas context
      * @return {number}                    The from cache.
      */
     private static getFromCache(key: string, letterSpacing: number, cache: CharacterWidthCache,
@@ -418,7 +419,7 @@ export class TextMetrics
     {
         let width = cache[key];
 
-        if (width === undefined)
+        if (typeof width !== 'number')
         {
             const spacing = ((key.length) * letterSpacing);
 
@@ -433,7 +434,7 @@ export class TextMetrics
      * Determines whether we should collapse breaking spaces
      *
      * @private
-     * @param  {string}   whiteSpace  The TextStyle property whiteSpace
+     * @param  {string}   whiteSpace - The TextStyle property whiteSpace
      * @return {boolean}  should collapse
      */
     private static collapseSpaces(whiteSpace: TextStyleWhiteSpace): boolean
@@ -445,7 +446,7 @@ export class TextMetrics
      * Determines whether we should collapse newLine chars
      *
      * @private
-     * @param  {string}   whiteSpace  The white space
+     * @param  {string}   whiteSpace - The white space
      * @return {boolean}  should collapse
      */
     private static collapseNewlines(whiteSpace: TextStyleWhiteSpace): boolean
@@ -457,7 +458,7 @@ export class TextMetrics
      * trims breaking whitespaces from string
      *
      * @private
-     * @param  {string}  text  The text
+     * @param  {string}  text - The text
      * @return {string}  trimmed string
      */
     private static trimRight(text: string): string
@@ -486,7 +487,7 @@ export class TextMetrics
      * Determines if char is a newline.
      *
      * @private
-     * @param  {string}  char  The character
+     * @param  {string}  char - The character
      * @return {boolean}  True if newline, False otherwise.
      */
     private static isNewline(char: string): boolean
@@ -502,11 +503,15 @@ export class TextMetrics
     /**
      * Determines if char is a breaking whitespace.
      *
-     * @private
-     * @param  {string}  char  The character
+     * It allows one to determine whether char should be a breaking whitespace
+     * For example certain characters in CJK langs or numbers.
+     * It must return a boolean.
+     *
+     * @param  {string}  char     - The character
+     * @param  {string}  [nextChar] - The next character
      * @return {boolean}  True if whitespace, False otherwise.
      */
-    private static isBreakingSpace(char: string): boolean
+    static isBreakingSpace(char: string, _nextChar?: string): boolean
     {
         if (typeof char !== 'string')
         {
@@ -520,7 +525,7 @@ export class TextMetrics
      * Splits a string into words, breaking-spaces and newLine characters
      *
      * @private
-     * @param  {string}  text       The text
+     * @param  {string}  text - The text
      * @return {string[]}  A tokenized array
      */
     private static tokenize(text: string): string[]
@@ -536,8 +541,9 @@ export class TextMetrics
         for (let i = 0; i < text.length; i++)
         {
             const char = text[i];
+            const nextChar = text[i + 1];
 
-            if (TextMetrics.isBreakingSpace(char) || TextMetrics.isNewline(char))
+            if (TextMetrics.isBreakingSpace(char, nextChar) || TextMetrics.isNewline(char))
             {
                 if (token !== '')
                 {
@@ -568,8 +574,8 @@ export class TextMetrics
      * Examples are if the token is CJK or numbers.
      * It must return a boolean.
      *
-     * @param  {string}  token       The token
-     * @param  {boolean}  breakWords  The style attr break words
+     * @param  {string}  token       - The token
+     * @param  {boolean}  breakWords - The style attr break words
      * @return {boolean} whether to break word or not
      */
     static canBreakWords(_token: string, breakWords: boolean): boolean
@@ -585,17 +591,15 @@ export class TextMetrics
      * For example certain characters in CJK langs or numbers.
      * It must return a boolean.
      *
-     * @param  {string}  char      The character
-     * @param  {string}  nextChar  The next character
-     * @param  {string}  token     The token/word the characters are from
-     * @param  {number}  index     The index in the token of the char
-     * @param  {boolean}  breakWords  The style attr break words
+     * @param  {string}  char        - The character
+     * @param  {string}  nextChar    - The next character
+     * @param  {string}  token       - The token/word the characters are from
+     * @param  {number}  index       - The index in the token of the char
+     * @param  {boolean}  breakWords - The style attr break words
      * @return {boolean} whether to break word or not
      */
-    /* eslint-disable @typescript-eslint/no-unused-vars */
     static canBreakChars(_char: string, _nextChar: string, _token: string, _index: number,
         _breakWords: boolean): boolean
-    /* eslint-enable @typescript-eslint/no-unused-vars */
     {
         return true;
     }
@@ -611,7 +615,7 @@ export class TextMetrics
      * // Correctly splits emojis, eg "🤪🤪" will result in two element array, each with one emoji.
      * TextMetrics.wordWrapSplit = (token) => [...token];
      *
-     * @param  {string}  token The token to split
+     * @param  {string}  token - The token to split
      * @return {string[]} The characters of the token
      */
     static wordWrapSplit(token: string): string[]
@@ -648,7 +652,7 @@ export class TextMetrics
         const metricsString = TextMetrics.METRICS_STRING + TextMetrics.BASELINE_SYMBOL;
         const width = Math.ceil(context.measureText(metricsString).width);
         let baseline = Math.ceil(context.measureText(TextMetrics.BASELINE_SYMBOL).width);
-        const height = 2 * baseline;
+        const height = Math.ceil(TextMetrics.HEIGHT_MULTIPLIER * baseline);
 
         baseline = baseline * TextMetrics.BASELINE_MULTIPLIER | 0;
 
@@ -843,6 +847,17 @@ TextMetrics.BASELINE_SYMBOL = 'M';
 TextMetrics.BASELINE_MULTIPLIER = 1.4;
 
 /**
+ * Height multiplier for setting height of canvas to calculate font metrics.
+ *
+ * @static
+ * @memberof PIXI.TextMetrics
+ * @name HEIGHT_MULTIPLIER
+ * @type {number}
+ * @default 2.00
+ */
+TextMetrics.HEIGHT_MULTIPLIER = 2.0;
+
+/**
  * Cache of new line chars.
  *
  * @memberof PIXI.TextMetrics
@@ -882,9 +897,8 @@ TextMetrics._breakingSpaces = [
  * A number, or a string containing a number.
  *
  * @memberof PIXI
- * @typedef IFontMetrics
+ * @typedef {object} IFontMetrics
  * @property {number} ascent - Font ascent
  * @property {number} descent - Font descent
  * @property {number} fontSize - Font size
  */
-

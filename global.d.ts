@@ -9,3 +9,8 @@ declare module '*.vert' {
 
     export default value;
 }
+
+declare module 'es6-promise-polyfill'
+declare module '@lerna/project'
+declare module '@lerna/batch-packages'
+declare module '@lerna/filter-packages'

@@ -7,6 +7,7 @@ const OFFSET = 1;
 const CULLING = 2;
 const DEPTH_TEST = 3;
 const WINDING = 4;
+const DEPTH_MASK = 5;
 
 /**
  * This is a WebGL state, and is is passed The WebGL StateManager.
@@ -31,6 +32,7 @@ export class State
         this.polygonOffset = 0;
 
         this.blend = true;
+        this.depthMask = true;
         //  this.depthTest = true;
     }
 
@@ -44,7 +46,7 @@ export class State
         return !!(this.data & (1 << BLEND));
     }
 
-    set blend(value) // eslint-disable-line require-jsdoc
+    set blend(value: boolean)
     {
         if (!!(this.data & (1 << BLEND)) !== value)
         {
@@ -63,7 +65,7 @@ export class State
         return !!(this.data & (1 << OFFSET));
     }
 
-    set offsets(value) // eslint-disable-line require-jsdoc
+    set offsets(value: boolean)
     {
         if (!!(this.data & (1 << OFFSET)) !== value)
         {
@@ -82,7 +84,7 @@ export class State
         return !!(this.data & (1 << CULLING));
     }
 
-    set culling(value) // eslint-disable-line require-jsdoc
+    set culling(value: boolean)
     {
         if (!!(this.data & (1 << CULLING)) !== value)
         {
@@ -101,11 +103,30 @@ export class State
         return !!(this.data & (1 << DEPTH_TEST));
     }
 
-    set depthTest(value) // eslint-disable-line require-jsdoc
+    set depthTest(value: boolean)
     {
         if (!!(this.data & (1 << DEPTH_TEST)) !== value)
         {
             this.data ^= (1 << DEPTH_TEST);
+        }
+    }
+
+    /**
+     * Enables or disables writing to the depth buffer.
+     *
+     * @member {boolean}
+     * @default true
+     */
+    get depthMask(): boolean
+    {
+        return !!(this.data & (1 << DEPTH_MASK));
+    }
+
+    set depthMask(value: boolean)
+    {
+        if (!!(this.data & (1 << DEPTH_MASK)) !== value)
+        {
+            this.data ^= (1 << DEPTH_MASK);
         }
     }
 
@@ -119,7 +140,7 @@ export class State
         return !!(this.data & (1 << WINDING));
     }
 
-    set clockwiseFrontFace(value) // eslint-disable-line require-jsdoc
+    set clockwiseFrontFace(value: boolean)
     {
         if (!!(this.data & (1 << WINDING)) !== value)
         {
@@ -140,7 +161,7 @@ export class State
         return this._blendMode;
     }
 
-    set blendMode(value) // eslint-disable-line require-jsdoc
+    set blendMode(value: BLEND_MODES)
     {
         this.blend = (value !== BLEND_MODES.NONE);
         this._blendMode = value;
@@ -157,11 +178,24 @@ export class State
         return this._polygonOffset;
     }
 
-    set polygonOffset(value) // eslint-disable-line require-jsdoc
+    set polygonOffset(value: number)
     {
         this.offsets = !!value;
         this._polygonOffset = value;
     }
+
+    // #if _DEBUG
+    toString(): string
+    {
+        return `[@pixi/core:State `
+            + `blendMode=${this.blendMode} `
+            + `clockwiseFrontFace=${this.clockwiseFrontFace} `
+            + `culling=${this.culling} `
+            + `depthMask=${this.depthMask} `
+            + `polygonOffset=${this.polygonOffset}`
+            + `]`;
+    }
+    // #endif
 
     static for2d(): State
     {

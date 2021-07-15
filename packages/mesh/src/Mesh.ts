@@ -1,4 +1,4 @@
-import { State } from '@pixi/core';
+import { Shader, State } from '@pixi/core';
 import { Point, Polygon } from '@pixi/math';
 import { BLEND_MODES, DRAW_MODES } from '@pixi/constants';
 import { Container } from '@pixi/display';
@@ -8,10 +8,13 @@ import { MeshMaterial } from './MeshMaterial';
 
 import type { IDestroyOptions } from '@pixi/display';
 import type { Texture, Renderer, Geometry, Buffer } from '@pixi/core';
-import type { IPoint } from '@pixi/math';
+import type { IPointData } from '@pixi/math';
 
 const tempPoint = new Point();
 const tempPolygon = new Polygon();
+
+// eslint-disable-next-line @typescript-eslint/no-empty-interface
+export interface Mesh extends GlobalMixins.Mesh {}
 
 /**
  * Base mesh class.
@@ -31,10 +34,10 @@ const tempPolygon = new Polygon();
  * @extends PIXI.Container
  * @memberof PIXI
  */
-export class Mesh extends Container
+export class Mesh<T extends Shader = MeshMaterial> extends Container
 {
     public readonly geometry: Geometry;
-    public shader: MeshMaterial;
+    public shader: T;
     public state: State;
     public drawMode: DRAW_MODES;
     public start: number;
@@ -45,25 +48,21 @@ export class Mesh extends Container
     private _transformID: number;
     private _roundPixels: boolean;
     private batchUvs: MeshBatchUvs;
-    /* eslint-disable @typescript-eslint/ban-ts-ignore */
-    // @ts-ignore
-    private uvs: Float32Array;
-    // @ts-ignore
-    private indices: Uint16Array;
-    // @ts-ignore
-    private _tintRGB: number;
-    // @ts-ignore
-    private _texture: Texture;
-    /* eslint-enable @typescript-eslint/ban-ts-ignore */
+
+    // Internal-only properties
+    uvs: Float32Array;
+    indices: Uint16Array;
+    _tintRGB: number;
+    _texture: Texture;
 
     /**
-     * @param {PIXI.Geometry} geometry  the geometry the mesh will use
-     * @param {PIXI.MeshMaterial} shader  the shader the mesh will use
-     * @param {PIXI.State} [state] the state that the WebGL context is required to be in to render the mesh
+     * @param {PIXI.Geometry} geometry - the geometry the mesh will use
+     * @param {PIXI.MeshMaterial} shader - the shader the mesh will use
+     * @param {PIXI.State} [state] - the state that the WebGL context is required to be in to render the mesh
      *        if no state is provided, uses {@link PIXI.State.for2d} to create a 2D state for PixiJS.
-     * @param {number} [drawMode=PIXI.DRAW_MODES.TRIANGLES] the drawMode, can be any of the PIXI.DRAW_MODES consts
+     * @param {number} [drawMode=PIXI.DRAW_MODES.TRIANGLES] - the drawMode, can be any of the PIXI.DRAW_MODES consts
      */
-    constructor(geometry: Geometry, shader: MeshMaterial, state?: State, drawMode = DRAW_MODES.TRIANGLES)
+    constructor(geometry: Geometry, shader: T, state?: State, drawMode = DRAW_MODES.TRIANGLES)
     {
         super();
 
@@ -115,14 +114,14 @@ export class Mesh extends Container
         this.size = 0;
 
         /**
-         * thease are used as easy access for batching
+         * these are used as easy access for batching
          * @member {Float32Array}
          * @private
          */
         this.uvs = null;
 
         /**
-         * thease are used as easy access for batching
+         * these are used as easy access for batching
          * @member {Uint16Array}
          * @private
          */
@@ -141,13 +140,9 @@ export class Mesh extends Container
          * @member {number}
          * @private
          */
-        this.vertexDirty = 0;
+        this.vertexDirty = -1;
 
         this._transformID = -1;
-
-        // Inherited from DisplayMode, set defaults
-        this.tint = 0xFFFFFF;
-        this.blendMode = BLEND_MODES.NORMAL;
 
         /**
          * Internal roundPixels field
@@ -190,12 +185,12 @@ export class Mesh extends Container
      * Alias for {@link PIXI.Mesh#shader}.
      * @member {PIXI.MeshMaterial}
      */
-    set material(value)
+    set material(value: T)
     {
         this.shader = value;
     }
 
-    get material(): MeshMaterial
+    get material(): T
     {
         return this.shader;
     }
@@ -208,7 +203,7 @@ export class Mesh extends Container
      * @default PIXI.BLEND_MODES.NORMAL;
      * @see PIXI.BLEND_MODES
      */
-    set blendMode(value)
+    set blendMode(value: BLEND_MODES)
     {
         this.state.blendMode = value;
     }
@@ -227,7 +222,7 @@ export class Mesh extends Container
      * @member {boolean}
      * @default false
      */
-    set roundPixels(value)
+    set roundPixels(value: boolean)
     {
         if (this._roundPixels !== value)
         {
@@ -245,32 +240,34 @@ export class Mesh extends Container
      * The multiply tint applied to the Mesh. This is a hex value. A value of
      * `0xFFFFFF` will remove any tint effect.
      *
+     * Null for non-MeshMaterial shaders
      * @member {number}
      * @default 0xFFFFFF
      */
     get tint(): number
     {
-        return this.shader.tint;
+        return 'tint' in this.shader ? (this.shader as unknown as MeshMaterial).tint : null;
     }
 
-    set tint(value)
+    set tint(value: number)
     {
-        this.shader.tint = value;
+        (this.shader as unknown as MeshMaterial).tint = value;
     }
 
     /**
      * The texture that the Mesh uses.
      *
+     * Null for non-MeshMaterial shaders
      * @member {PIXI.Texture}
      */
     get texture(): Texture
     {
-        return this.shader.texture;
+        return 'texture' in this.shader ? (this.shader as unknown as MeshMaterial).texture : null;
     }
 
-    set texture(value)
+    set texture(value: Texture)
     {
-        this.shader.texture = value;
+        (this.shader as unknown as MeshMaterial).texture = value;
     }
 
     /**
@@ -283,10 +280,11 @@ export class Mesh extends Container
         // set properties for batching..
         // TODO could use a different way to grab verts?
         const vertices = this.geometry.buffers[0].data;
+        const shader = this.shader as unknown as MeshMaterial;
 
         // TODO benchmark check for attribute size..
         if (
-            this.shader.batchable
+            shader.batchable
             && this.drawMode === DRAW_MODES.TRIANGLES
             && vertices.length < Mesh.BATCHABLE_SIZE * 2
         )
@@ -306,7 +304,7 @@ export class Mesh extends Container
      */
     protected _renderDefault(renderer: Renderer): void
     {
-        const shader = this.shader;
+        const shader = this.shader as unknown as MeshMaterial;
 
         shader.alpha = this.worldAlpha;
         if (shader.update)
@@ -316,12 +314,8 @@ export class Mesh extends Container
 
         renderer.batch.flush();
 
-        if (shader.program.uniformData.translationMatrix)
-        {
-            shader.uniforms.translationMatrix = this.transform.worldTransform.toArray(true);
-        }
-
         // bind and sync uniforms..
+        shader.uniforms.translationMatrix = this.transform.worldTransform.toArray(true);
         renderer.shader.bind(shader);
 
         // set state..
@@ -342,20 +336,21 @@ export class Mesh extends Container
     protected _renderToBatch(renderer: Renderer): void
     {
         const geometry = this.geometry;
+        const shader = this.shader as unknown as MeshMaterial;
 
-        if (this.shader.uvMatrix)
+        if (shader.uvMatrix)
         {
-            this.shader.uvMatrix.update();
+            shader.uvMatrix.update();
             this.calculateUvs();
         }
 
         // set properties for batching..
         this.calculateVertices();
         this.indices = geometry.indexBuffer.data as Uint16Array;
-        this._tintRGB = this.shader._tintRGB;
-        this._texture = this.shader.texture;
+        this._tintRGB = shader._tintRGB;
+        this._texture = shader.texture;
 
-        const pluginName = this.material.pluginName;
+        const pluginName = (this.material as unknown as MeshMaterial).pluginName;
 
         renderer.batch.setObjectRenderer(renderer.plugins[pluginName]);
         renderer.plugins[pluginName].render(this);
@@ -367,9 +362,11 @@ export class Mesh extends Container
     public calculateVertices(): void
     {
         const geometry = this.geometry;
-        const vertices = geometry.buffers[0].data;
+        const verticesBuffer = geometry.buffers[0];
+        const vertices = verticesBuffer.data;
+        const vertexDirtyId = verticesBuffer._updateID;
 
-        if ((geometry as any).vertexDirtyId === this.vertexDirty && this._transformID === this.transform._worldID)
+        if (vertexDirtyId === this.vertexDirty && this._transformID === this.transform._worldID)
         {
             return;
         }
@@ -410,7 +407,7 @@ export class Mesh extends Container
             }
         }
 
-        this.vertexDirty = (geometry as any).vertexDirtyId;
+        this.vertexDirty = vertexDirtyId;
     }
 
     /**
@@ -419,12 +416,13 @@ export class Mesh extends Container
     public calculateUvs(): void
     {
         const geomUvs = this.geometry.buffers[1];
+        const shader = this.shader as unknown as MeshMaterial;
 
-        if (!this.shader.uvMatrix.isSimple)
+        if (!shader.uvMatrix.isSimple)
         {
             if (!this.batchUvs)
             {
-                this.batchUvs = new MeshBatchUvs(geomUvs, this.shader.uvMatrix);
+                this.batchUvs = new MeshBatchUvs(geomUvs, shader.uvMatrix);
             }
             this.batchUvs.update();
             this.uvs = this.batchUvs.data;
@@ -451,10 +449,10 @@ export class Mesh extends Container
     /**
      * Tests if a point is inside this mesh. Works only for PIXI.DRAW_MODES.TRIANGLES.
      *
-     * @param {PIXI.IPoint} point the point to test
+     * @param {PIXI.IPointData} point - the point to test
      * @return {boolean} the result of the test
      */
-    public containsPoint(point: IPoint): boolean
+    public containsPoint(point: IPointData): boolean
     {
         if (!this.getBounds().contains(point.x, point.y))
         {
@@ -499,7 +497,7 @@ export class Mesh extends Container
      * @param {boolean} [options.children=false] - if set to true, all the children will have
      *  their destroy method called as well. 'options' will be passed on to those calls.
      */
-    public destroy(options: IDestroyOptions|boolean): void
+    public destroy(options?: IDestroyOptions|boolean): void
     {
         super.destroy(options);
 
@@ -507,6 +505,12 @@ export class Mesh extends Container
         if (this.geometry.refCount === 0)
         {
             this.geometry.dispose();
+        }
+
+        if (this._cachedTexture)
+        {
+            this._cachedTexture.destroy();
+            this._cachedTexture = null;
         }
 
         (this as any).geometry = null;
@@ -526,4 +530,3 @@ export class Mesh extends Container
      */
     public static BATCHABLE_SIZE = 100;
 }
-

@@ -12,12 +12,12 @@ import type { GLTexture } from '../GLTexture';
 /**
  * Buffer resource with data of typed array.
  * @class
- * @extends PIXI.resources.Resource
- * @memberof PIXI.resources
+ * @extends PIXI.Resource
+ * @memberof PIXI
  */
 export class BufferResource extends Resource
 {
-    data: Float32Array|Uint8Array|Uint32Array;
+    data: Float32Array|Uint8Array|Uint16Array|Uint32Array;
 
     /**
      * @param {Float32Array|Uint8Array|Uint32Array} source - Source buffer
@@ -25,7 +25,7 @@ export class BufferResource extends Resource
      * @param {number} options.width - Width of the texture
      * @param {number} options.height - Height of the texture
      */
-    constructor(source: Float32Array|Uint8Array|Uint32Array, options: ISize)
+    constructor(source: Float32Array|Uint8Array|Uint16Array|Uint32Array, options: ISize)
     {
         const { width, height } = options || {};
 
@@ -47,9 +47,9 @@ export class BufferResource extends Resource
 
     /**
      * Upload the texture to the GPU.
-     * @param {PIXI.Renderer} renderer Upload to the renderer
-     * @param {PIXI.BaseTexture} baseTexture Reference to parent texture
-     * @param {PIXI.GLTexture} glTexture glTexture
+     * @param {PIXI.Renderer} renderer - Upload to the renderer
+     * @param {PIXI.BaseTexture} baseTexture - Reference to parent texture
+     * @param {PIXI.GLTexture} glTexture - glTexture
      * @returns {boolean} true is success
      */
     upload(renderer: Renderer, baseTexture: BaseTexture, glTexture: GLTexture): boolean
@@ -58,15 +58,18 @@ export class BufferResource extends Resource
 
         gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, baseTexture.alphaMode === ALPHA_MODES.UNPACK);
 
-        if (glTexture.width === baseTexture.width && glTexture.height === baseTexture.height)
+        const width = baseTexture.realWidth;
+        const height = baseTexture.realHeight;
+
+        if (glTexture.width === width && glTexture.height === height)
         {
             gl.texSubImage2D(
                 baseTexture.target,
                 0,
                 0,
                 0,
-                baseTexture.width,
-                baseTexture.height,
+                width,
+                height,
                 baseTexture.format,
                 baseTexture.type,
                 this.data
@@ -74,15 +77,15 @@ export class BufferResource extends Resource
         }
         else
         {
-            glTexture.width = baseTexture.width;
-            glTexture.height = baseTexture.height;
+            glTexture.width = width;
+            glTexture.height = height;
 
             gl.texImage2D(
                 baseTexture.target,
                 0,
                 glTexture.internalFormat,
-                baseTexture.width,
-                baseTexture.height,
+                width,
+                height,
                 0,
                 baseTexture.format,
                 glTexture.type,
@@ -109,7 +112,7 @@ export class BufferResource extends Resource
      * @param {*} source - The source object
      * @return {boolean} `true` if <canvas>
      */
-    static test(source: any): boolean
+    static test(source: unknown): source is Float32Array|Uint8Array|Uint32Array
     {
         return source instanceof Float32Array
             || source instanceof Uint8Array

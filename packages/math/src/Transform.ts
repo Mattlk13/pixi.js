@@ -1,6 +1,9 @@
 import { ObservablePoint } from './ObservablePoint';
 import { Matrix } from './Matrix';
 
+// eslint-disable-next-line @typescript-eslint/no-empty-interface
+export interface Transform extends GlobalMixins.Transform {}
+
 /**
  * Transform that takes care about its versions
  *
@@ -183,6 +186,18 @@ export class Transform
         this._localID++;
     }
 
+    // #if _DEBUG
+    toString(): string
+    {
+        return `[@pixi/math:Transform `
+            + `position=(${this.position.x}, ${this.position.y}) `
+            + `rotation=${this.rotation} `
+            + `scale=(${this.scale.x}, ${this.scale.y}) `
+            + `skew=(${this.skew.x}, ${this.skew.y}) `
+            + `]`;
+    }
+    // #endif
+
     /**
      * Updates the local transformation matrix.
      */
@@ -273,7 +288,7 @@ export class Transform
         return this._rotation;
     }
 
-    set rotation(value) // eslint-disable-line require-jsdoc
+    set rotation(value: number)
     {
         if (this._rotation !== value)
         {

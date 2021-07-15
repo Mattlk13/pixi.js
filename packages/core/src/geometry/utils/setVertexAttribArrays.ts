@@ -1,15 +1,16 @@
 import type { IRenderingContext } from '../../IRenderingContext';
+import type { Dict } from '@pixi/utils';
 
 // var GL_MAP = {};
 
 /**
- * @param gl {WebGLRenderingContext} The current WebGL context
- * @param attribs {*}
- * @param state {*}
+ * @param {WebGLRenderingContext} gl - The current WebGL context
+ * @param {*} attribs
+ * @param {*} state
  * @private
  */
 export function setVertexAttribArrays(gl: IRenderingContext,
-    attribs: {[x: string]: any}, state: {[x: string]: any}): void
+    attribs: Dict<any>, state: Dict<any>): void
 {
     let i;
 

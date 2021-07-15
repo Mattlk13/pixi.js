@@ -24,7 +24,7 @@ export class SimpleMesh extends Mesh
      * @param {number} [drawMode] - the drawMode, can be any of the Mesh.DRAW_MODES consts
      */
     constructor(
-        texture = Texture.EMPTY,
+        texture: Texture = Texture.EMPTY,
         vertices?: IArrayBuffer,
         uvs?: IArrayBuffer,
         indices?: IArrayBuffer,
@@ -54,7 +54,7 @@ export class SimpleMesh extends Mesh
     {
         return this.geometry.getBuffer('aVertexPosition').data;
     }
-    set vertices(value)
+    set vertices(value: ITypedArray)
     {
         this.geometry.getBuffer('aVertexPosition').data = value;
     }

@@ -41,9 +41,9 @@ export class AnimatedSprite extends Sprite
     public animationSpeed: number;
     public loop: boolean;
     public updateAnchor: boolean;
-    public onComplete: () => void;
-    public onFrameChange: (currentFrame: number) => void;
-    public onLoop: () => void;
+    public onComplete?: () => void;
+    public onFrameChange?: (currentFrame: number) => void;
+    public onLoop?: () => void;
 
     private _playing: boolean;
     private _textures: Texture[];
@@ -73,8 +73,6 @@ export class AnimatedSprite extends Sprite
          * @private
          */
         this._durations = null;
-
-        this.textures = textures;
 
         /**
          * `true` uses PIXI.Ticker.shared to auto update animation time.
@@ -125,22 +123,35 @@ export class AnimatedSprite extends Sprite
         this.updateAnchor = false;
 
         /**
-         * Function to call when an AnimatedSprite finishes playing.
+         * User-assigned function to call when an AnimatedSprite finishes playing.
          *
+         * @example
+         * animation.onComplete = function () {
+         *   // finished!
+         * };
          * @member {Function}
          */
         this.onComplete = null;
 
         /**
-         * Function to call when an AnimatedSprite changes which texture is being rendered.
+         * User-assigned function to call when an AnimatedSprite changes which texture is being rendered.
          *
+         * @example
+         * animation.onFrameChange = function () {
+         *   // updated!
+         * };
          * @member {Function}
          */
         this.onFrameChange = null;
 
         /**
-         * Function to call when `loop` is true, and an AnimatedSprite is played and loops around to start again.
+         * User-assigned function to call when `loop` is true, and an AnimatedSprite is played and
+         * loops around to start again.
          *
+         * @example
+         * animation.onLoop = function () {
+         *   // looped!
+         * };
          * @member {Function}
          */
         this.onLoop = null;
@@ -162,6 +173,8 @@ export class AnimatedSprite extends Sprite
          * @private
          */
         this._previousFrame = null;
+
+        this.textures = textures;
     }
 
     /**
@@ -247,6 +260,11 @@ export class AnimatedSprite extends Sprite
      */
     update(deltaTime: number): void
     {
+        if (!this._playing)
+        {
+            return;
+        }
+
         const elapsed = this.animationSpeed * deltaTime;
         const previousFrame = this.currentFrame;
 
@@ -358,7 +376,7 @@ export class AnimatedSprite extends Sprite
      * @param {boolean} [options.texture=false] - Should it destroy the current texture of the sprite as well.
      * @param {boolean} [options.baseTexture=false] - Should it destroy the base texture of the sprite as well.
      */
-    public destroy(options: IDestroyOptions|boolean): void
+    public destroy(options?: IDestroyOptions|boolean): void
     {
         this.stop();
         super.destroy(options);
@@ -429,7 +447,7 @@ export class AnimatedSprite extends Sprite
         return this._textures;
     }
 
-    set textures(value) // eslint-disable-line require-jsdoc
+    set textures(value: Texture[]|FrameObject[])
     {
         if (value[0] instanceof Texture)
         {
@@ -447,6 +465,7 @@ export class AnimatedSprite extends Sprite
                 this._durations.push((value[i] as FrameObject).time);
             }
         }
+        this._previousFrame = null;
         this.gotoAndStop(0);
         this.updateTexture();
     }
@@ -490,7 +509,7 @@ export class AnimatedSprite extends Sprite
         return this._autoUpdate;
     }
 
-    set autoUpdate(value) // eslint-disable-line require-jsdoc
+    set autoUpdate(value: boolean)
     {
         if (value !== this._autoUpdate)
         {

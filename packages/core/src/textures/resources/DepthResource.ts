@@ -7,16 +7,16 @@ import type { GLTexture } from '../GLTexture';
 /**
  * Resource type for DepthTexture.
  * @class
- * @extends PIXI.resources.BufferResource
- * @memberof PIXI.resources
+ * @extends PIXI.BufferResource
+ * @memberof PIXI
  */
 export class DepthResource extends BufferResource
 {
     /**
      * Upload the texture to the GPU.
-     * @param {PIXI.Renderer} renderer Upload to the renderer
-     * @param {PIXI.BaseTexture} baseTexture Reference to parent texture
-     * @param {PIXI.GLTexture} glTexture glTexture
+     * @param {PIXI.Renderer} renderer - Upload to the renderer
+     * @param {PIXI.BaseTexture} baseTexture - Reference to parent texture
+     * @param {PIXI.GLTexture} glTexture - glTexture
      * @returns {boolean} true is success
      */
     upload(renderer: Renderer, baseTexture: BaseTexture, glTexture: GLTexture): boolean
@@ -25,15 +25,18 @@ export class DepthResource extends BufferResource
 
         gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, baseTexture.alphaMode === ALPHA_MODES.UNPACK);
 
-        if (glTexture.width === baseTexture.width && glTexture.height === baseTexture.height)
+        const width = baseTexture.realWidth;
+        const height = baseTexture.realHeight;
+
+        if (glTexture.width === width && glTexture.height === height)
         {
             gl.texSubImage2D(
                 baseTexture.target,
                 0,
                 0,
                 0,
-                baseTexture.width,
-                baseTexture.height,
+                width,
+                height,
                 baseTexture.format,
                 baseTexture.type,
                 this.data,
@@ -41,16 +44,16 @@ export class DepthResource extends BufferResource
         }
         else
         {
-            glTexture.width = baseTexture.width;
-            glTexture.height = baseTexture.height;
+            glTexture.width = width;
+            glTexture.height = height;
 
             gl.texImage2D(
                 baseTexture.target,
                 0,
                 //  gl.DEPTH_COMPONENT16 Needed for depth to render properly in webgl2.0
                 renderer.context.webGLVersion === 1 ? gl.DEPTH_COMPONENT : gl.DEPTH_COMPONENT16,
-                baseTexture.width,
-                baseTexture.height,
+                width,
+                height,
                 0,
                 baseTexture.format,
                 baseTexture.type,

@@ -5,6 +5,8 @@ import { BufferResource } from './resources/BufferResource';
 import { autoDetectResource } from './resources/autoDetectResource';
 import { settings } from '@pixi/settings';
 
+import type { MSAA_QUALITY } from '@pixi/constants';
+import type { IAutoDetectOptions } from './resources/autoDetectResource';
 import type { GLTexture } from './GLTexture';
 
 const defaultBufferOptions = {
@@ -15,7 +17,7 @@ const defaultBufferOptions = {
 
 export type ImageSource = HTMLImageElement|HTMLCanvasElement|HTMLVideoElement|ImageBitmap;
 
-export interface IBaseTextureOptions {
+export interface IBaseTextureOptions<RO = any> {
     alphaMode?: ALPHA_MODES;
     mipmap?: MIPMAP_MODES;
     anisotropicLevel?: number;
@@ -27,7 +29,9 @@ export interface IBaseTextureOptions {
     type?: TYPES;
     target?: TARGETS;
     resolution?: number;
-    resourceOptions?: any;
+    multisample?: MSAA_QUALITY;
+    resourceOptions?: RO;
+    pixiIdPrefix?: string;
 }
 
 export interface BaseTexture extends GlobalMixins.BaseTexture, EventEmitter {}
@@ -40,54 +44,201 @@ export interface BaseTexture extends GlobalMixins.BaseTexture, EventEmitter {}
  * @class
  * @extends PIXI.utils.EventEmitter
  * @memberof PIXI
- * @param {PIXI.resources.Resource|string|HTMLImageElement|HTMLCanvasElement|HTMLVideoElement} [resource=null]
- *        The current resource to use, for things that aren't Resource objects, will be converted
- *        into a Resource.
- * @param {Object} [options] - Collection of options
- * @param {PIXI.MIPMAP_MODES} [options.mipmap=PIXI.settings.MIPMAP_TEXTURES] - If mipmapping is enabled for texture
- * @param {number} [options.anisotropicLevel=PIXI.settings.ANISOTROPIC_LEVEL] - Anisotropic filtering level of texture
- * @param {PIXI.WRAP_MODES} [options.wrapMode=PIXI.settings.WRAP_MODE] - Wrap mode for textures
- * @param {PIXI.SCALE_MODES} [options.scaleMode=PIXI.settings.SCALE_MODE] - Default scale mode, linear, nearest
- * @param {PIXI.FORMATS} [options.format=PIXI.FORMATS.RGBA] - GL format type
- * @param {PIXI.TYPES} [options.type=PIXI.TYPES.UNSIGNED_BYTE] - GL data type
- * @param {PIXI.TARGETS} [options.target=PIXI.TARGETS.TEXTURE_2D] - GL texture target
- * @param {PIXI.ALPHA_MODES} [options.alphaMode=PIXI.ALPHA_MODES.UNPACK] - Pre multiply the image alpha
- * @param {number} [options.width=0] - Width of the texture
- * @param {number} [options.height=0] - Height of the texture
- * @param {number} [options.resolution] - Resolution of the base texture
- * @param {object} [options.resourceOptions] - Optional resource options,
- *        see {@link PIXI.resources.autoDetectResource autoDetectResource}
+ * @typeParam R - The BaseTexture's Resource type.
+ * @typeParam RO - The options for constructing resource.
  */
-export class BaseTexture extends EventEmitter
+export class BaseTexture<R extends Resource = Resource, RO = IAutoDetectOptions> extends EventEmitter
 {
+    /**
+     * The width of the base texture set when the image has loaded
+     *
+     * @readonly
+     * @default PIXI.settings.RESOLUTION
+     */
     public width: number;
+
+    /**
+     * The height of the base texture set when the image has loaded
+     *
+     * @readonly
+     */
     public height: number;
+
+    /**
+     * The resolution / device pixel ratio of the texture
+     *
+     * @default PIXI.settings.RESOLUTION
+     */
     public resolution: number;
+
+    /**
+     * How to treat premultiplied alpha, see {@link PIXI.ALPHA_MODES}.
+     *
+     * @member {PIXI.ALPHA_MODES}
+     * @default PIXI.ALPHA_MODES.UNPACK
+     */
     public alphaMode?: ALPHA_MODES;
-    public mipmap?: MIPMAP_MODES;
+
+    /**
+     * Anisotropic filtering level of texture
+     *
+     * @member {number}
+     * @default PIXI.settings.ANISOTROPIC_LEVEL
+     */
     public anisotropicLevel?: number;
-    public scaleMode?: SCALE_MODES;
-    public wrapMode?: WRAP_MODES;
+
+    /**
+     * The pixel format of the texture
+     *
+     * @default PIXI.FORMATS.RGBA
+     */
     public format?: FORMATS;
+
+    /**
+     * The type of resource data
+     *
+     * @default PIXI.TYPES.UNSIGNED_BYTE
+     */
     public type?: TYPES;
+
+    /**
+     * The target type
+     *
+     * @default PIXI.TARGETS.TEXTURE_2D
+     */
     public target?: TARGETS;
 
-    protected uid: number;
+    /**
+     * Global unique identifier for this BaseTexture
+     *
+     * @protected
+     */
+    public readonly uid: number;
+
+    /**
+     * Used by automatic texture Garbage Collection, stores last GC tick when it was bound
+     *
+     * @protected
+     */
     touched: number;
+
+    /**
+     * Whether or not the texture is a power of two, try to use power of two textures as much
+     * as you can
+     *
+     * @readonlys
+     * @default false
+     */
     isPowerOfTwo: boolean;
 
+    /**
+     * The map of render context textures where this is bound
+     *
+     * @private
+     */
     _glTextures: { [key: number]: GLTexture };
+
+    /**
+     * Used by TextureSystem to only update texture to the GPU when needed.
+     * Please call `update()` to increment it.
+     *
+     * @readonly
+     */
     dirtyId: number;
+
+    /**
+     * Used by TextureSystem to only update texture style when needed.
+     *
+     * @protected
+     */
     dirtyStyleId: number;
+
+    /**
+     * Currently default cache ID.
+     *
+     * @member {string}
+     */
     public cacheId: string;
+
+    /**
+     * Generally speaking means when resource is loaded.
+     * @readonly
+     * @member {boolean}
+     */
     public valid: boolean;
-    textureCacheIds: Array<string>;
+
+    /**
+     * The collection of alternative cache ids, since some BaseTextures
+     * can have more than one ID, short name and longer full URL
+     *
+     * @member {Array<string>}
+     * @readonly
+     */
+    public textureCacheIds: Array<string>;
+
+    /**
+     * Flag if BaseTexture has been destroyed.
+     *
+     * @member {boolean}
+     * @readonly
+     */
     public destroyed: boolean;
-    public resource: Resource;
+
+    /**
+     * The resource used by this BaseTexture, there can only
+     * be one resource per BaseTexture, but textures can share
+     * resources.
+     *
+     * @member {PIXI.Resource}
+     * @readonly
+     */
+    public resource: R;
+
+    /**
+     * Number of the texture batch, used by multi-texture renderers
+     *
+     * @member {number}
+     */
     _batchEnabled: number;
+
+    /**
+     * Location inside texture batch, used by multi-texture renderers
+     *
+     * @member {number}
+     */
     _batchLocation: number;
 
-    constructor(resource: Resource | ImageSource | string | any = null, options: IBaseTextureOptions = null)
+    /**
+     * Whether its a part of another texture, handled by ArrayResource or CubeResource
+     *
+     * @member {PIXI.BaseTexture}
+     */
+    parentTextureArray: BaseTexture;
+
+    private _mipmap?: MIPMAP_MODES;
+    private _scaleMode?: SCALE_MODES;
+    private _wrapMode?: WRAP_MODES;
+
+    /**
+     * @param {PIXI.Resource|string|HTMLImageElement|HTMLCanvasElement|HTMLVideoElement} [resource=null] -
+     *        The current resource to use, for things that aren't Resource objects, will be converted
+     *        into a Resource.
+     * @param {Object} [options] - Collection of options
+     * @param {PIXI.MIPMAP_MODES} [options.mipmap=PIXI.settings.MIPMAP_TEXTURES] - If mipmapping is enabled for texture
+     * @param {number} [options.anisotropicLevel=PIXI.settings.ANISOTROPIC_LEVEL] - Anisotropic filtering level of texture
+     * @param {PIXI.WRAP_MODES} [options.wrapMode=PIXI.settings.WRAP_MODE] - Wrap mode for textures
+     * @param {PIXI.SCALE_MODES} [options.scaleMode=PIXI.settings.SCALE_MODE] - Default scale mode, linear, nearest
+     * @param {PIXI.FORMATS} [options.format=PIXI.FORMATS.RGBA] - GL format type
+     * @param {PIXI.TYPES} [options.type=PIXI.TYPES.UNSIGNED_BYTE] - GL data type
+     * @param {PIXI.TARGETS} [options.target=PIXI.TARGETS.TEXTURE_2D] - GL texture target
+     * @param {PIXI.ALPHA_MODES} [options.alphaMode=PIXI.ALPHA_MODES.UNPACK] - Pre multiply the image alpha
+     * @param {number} [options.width=0] - Width of the texture
+     * @param {number} [options.height=0] - Height of the texture
+     * @param {number} [options.resolution=PIXI.settings.RESOLUTION] - Resolution of the base texture
+     * @param {object} [options.resourceOptions] - Optional resource options,
+     *        see {@link PIXI.autoDetectResource autoDetectResource}
+     */
+    constructor(resource: R | ImageSource | string | any = null, options: IBaseTextureOptions<RO> = null)
     {
         super();
 
@@ -99,208 +250,39 @@ export class BaseTexture extends EventEmitter
         // Convert the resource to a Resource object
         if (resource && !(resource instanceof Resource))
         {
-            resource = autoDetectResource(resource, resourceOptions);
+            resource = autoDetectResource<R, RO>(resource, resourceOptions);
             resource.internal = true;
         }
 
-        /**
-         * The width of the base texture set when the image has loaded
-         *
-         * @readonly
-         * @member {number}
-         */
         this.width = width || 0;
-
-        /**
-         * The height of the base texture set when the image has loaded
-         *
-         * @readonly
-         * @member {number}
-         */
         this.height = height || 0;
-
-        /**
-         * The resolution / device pixel ratio of the texture
-         *
-         * @member {number}
-         * @default PIXI.settings.RESOLUTION
-         */
         this.resolution = resolution || settings.RESOLUTION;
-
-        /**
-         * Mipmap mode of the texture, affects downscaled images
-         *
-         * @member {PIXI.MIPMAP_MODES}
-         * @default PIXI.settings.MIPMAP_TEXTURES
-         */
-        this.mipmap = mipmap !== undefined ? mipmap : settings.MIPMAP_TEXTURES;
-
-        /**
-         * Anisotropic filtering level of texture
-         *
-         * @member {number}
-         * @default PIXI.settings.ANISOTROPIC_LEVEL
-         */
+        this._mipmap = mipmap !== undefined ? mipmap : settings.MIPMAP_TEXTURES;
         this.anisotropicLevel = anisotropicLevel !== undefined ? anisotropicLevel : settings.ANISOTROPIC_LEVEL;
-
-        /**
-         * How the texture wraps
-         * @member {number}
-         */
-        this.wrapMode = wrapMode || settings.WRAP_MODE;
-
-        /**
-         * The scale mode to apply when scaling this texture
-         *
-         * @member {PIXI.SCALE_MODES}
-         * @default PIXI.settings.SCALE_MODE
-         */
-        this.scaleMode = scaleMode !== undefined ? scaleMode : settings.SCALE_MODE;
-
-        /**
-         * The pixel format of the texture
-         *
-         * @member {PIXI.FORMATS}
-         * @default PIXI.FORMATS.RGBA
-         */
+        this._wrapMode = wrapMode || settings.WRAP_MODE;
+        this._scaleMode = scaleMode !== undefined ? scaleMode : settings.SCALE_MODE;
         this.format = format || FORMATS.RGBA;
-
-        /**
-         * The type of resource data
-         *
-         * @member {PIXI.TYPES}
-         * @default PIXI.TYPES.UNSIGNED_BYTE
-         */
         this.type = type || TYPES.UNSIGNED_BYTE;
-
-        /**
-         * The target type
-         *
-         * @member {PIXI.TARGETS}
-         * @default PIXI.TARGETS.TEXTURE_2D
-         */
         this.target = target || TARGETS.TEXTURE_2D;
-
-        /**
-         * How to treat premultiplied alpha, see {@link PIXI.ALPHA_MODES}.
-         *
-         * @member {PIXI.ALPHA_MODES}
-         * @default PIXI.ALPHA_MODES.UNPACK
-         */
         this.alphaMode = alphaMode !== undefined ? alphaMode : ALPHA_MODES.UNPACK;
 
-        if ((options as any).premultiplyAlpha !== undefined)
-        {
-            // triggers deprecation
-            (this as any).premultiplyAlpha = (options as any).premultiplyAlpha;
-        }
-
-        /**
-         * Global unique identifier for this BaseTexture
-         *
-         * @member {number}
-         * @protected
-         */
         this.uid = uid();
-
-        /**
-         * Used by automatic texture Garbage Collection, stores last GC tick when it was bound
-         *
-         * @member {number}
-         * @protected
-         */
         this.touched = 0;
-
-        /**
-         * Whether or not the texture is a power of two, try to use power of two textures as much
-         * as you can
-         *
-         * @readonly
-         * @member {boolean}
-         * @default false
-         */
         this.isPowerOfTwo = false;
         this._refreshPOT();
 
-        /**
-         * The map of render context textures where this is bound
-         *
-         * @member {Object}
-         * @private
-         */
         this._glTextures = {};
-
-        /**
-         * Used by TextureSystem to only update texture to the GPU when needed.
-         * Please call `update()` to increment it.
-         *
-         * @readonly
-         * @member {number}
-         */
         this.dirtyId = 0;
-
-        /**
-         * Used by TextureSystem to only update texture style when needed.
-         *
-         * @protected
-         * @member {number}
-         */
         this.dirtyStyleId = 0;
-
-        /**
-         * Currently default cache ID.
-         *
-         * @member {string}
-         */
         this.cacheId = null;
-
-        /**
-         * Generally speaking means when resource is loaded.
-         * @readonly
-         * @member {boolean}
-         */
         this.valid = width > 0 && height > 0;
-
-        /**
-         * The collection of alternative cache ids, since some BaseTextures
-         * can have more than one ID, short name and longer full URL
-         *
-         * @member {Array<string>}
-         * @readonly
-         */
         this.textureCacheIds = [];
-
-        /**
-         * Flag if BaseTexture has been destroyed.
-         *
-         * @member {boolean}
-         * @readonly
-         */
         this.destroyed = false;
-
-        /**
-         * The resource used by this BaseTexture, there can only
-         * be one resource per BaseTexture, but textures can share
-         * resources.
-         *
-         * @member {PIXI.resources.Resource}
-         * @readonly
-         */
         this.resource = null;
 
-        /**
-         * Number of the texture batch, used by multi-texture renderers
-         *
-         * @member {number}
-         */
         this._batchEnabled = 0;
-
-        /**
-         * Location inside texture batch, used by multi-texture renderers
-         *
-         * @member {number}
-         */
         this._batchLocation = 0;
+        this.parentTextureArray = null;
 
         /**
          * Fired when a not-immediately-available source finishes loading.
@@ -370,6 +352,62 @@ export class BaseTexture extends EventEmitter
     }
 
     /**
+     * Mipmap mode of the texture, affects downscaled images
+     *
+     * @member {PIXI.MIPMAP_MODES}
+     * @default PIXI.settings.MIPMAP_TEXTURES
+     */
+    get mipmap(): MIPMAP_MODES
+    {
+        return this._mipmap;
+    }
+    set mipmap(value: MIPMAP_MODES)
+    {
+        if (this._mipmap !== value)
+        {
+            this._mipmap = value;
+            this.dirtyStyleId++;
+        }
+    }
+
+    /**
+     * The scale mode to apply when scaling this texture
+     *
+     * @member {PIXI.SCALE_MODES}
+     * @default PIXI.settings.SCALE_MODE
+     */
+    get scaleMode(): SCALE_MODES
+    {
+        return this._scaleMode;
+    }
+    set scaleMode(value: SCALE_MODES)
+    {
+        if (this._scaleMode !== value)
+        {
+            this._scaleMode = value;
+            this.dirtyStyleId++;
+        }
+    }
+
+    /**
+     * How the texture wraps
+     * @member {PIXI.WRAP_MODES}
+     * @default PIXI.settings.WRAP_MODE
+     */
+    get wrapMode(): WRAP_MODES
+    {
+        return this._wrapMode;
+    }
+    set wrapMode(value: WRAP_MODES)
+    {
+        if (this._wrapMode !== value)
+        {
+            this._wrapMode = value;
+            this.dirtyStyleId++;
+        }
+    }
+
+    /**
      * Changes style options of BaseTexture
      *
      * @param {PIXI.SCALE_MODES} [scaleMode] - Pixi scalemode
@@ -403,9 +441,9 @@ export class BaseTexture extends EventEmitter
     /**
      * Changes w/h/resolution. Texture becomes valid if width and height are greater than zero.
      *
-     * @param {number} width Visual width
-     * @param {number} height Visual height
-     * @param {number} [resolution] Optionally set resolution
+     * @param {number} width - Visual width
+     * @param {number} height - Visual height
+     * @param {number} [resolution] - Optionally set resolution
      * @returns {PIXI.BaseTexture} this
      */
     setSize(width: number, height: number, resolution?: number): this
@@ -422,9 +460,9 @@ export class BaseTexture extends EventEmitter
     /**
      * Sets real size of baseTexture, preserves current resolution.
      *
-     * @param {number} realWidth Full rendered width
-     * @param {number} realHeight Full rendered height
-     * @param {number} [resolution] Optionally set resolution
+     * @param {number} realWidth - Full rendered width
+     * @param {number} realHeight - Full rendered height
+     * @param {number} [resolution] - Optionally set resolution
      * @returns {PIXI.BaseTexture} this
      */
     setRealSize(realWidth: number, realHeight: number, resolution?: number): this
@@ -451,7 +489,7 @@ export class BaseTexture extends EventEmitter
     /**
      * Changes resolution
      *
-     * @param {number} resolution res
+     * @param {number} resolution - res
      * @returns {PIXI.BaseTexture} this
      */
     setResolution(resolution: number): this
@@ -480,10 +518,10 @@ export class BaseTexture extends EventEmitter
     /**
      * Sets the resource if it wasn't set. Throws error if resource already present
      *
-     * @param {PIXI.resources.Resource} resource - that is managing this BaseTexture
+     * @param {PIXI.Resource} resource - that is managing this BaseTexture
      * @returns {PIXI.BaseTexture} this
      */
-    setResource(resource: Resource): this
+    setResource(resource: R): this
     {
         if (this.resource === resource)
         {
@@ -599,12 +637,13 @@ export class BaseTexture extends EventEmitter
      * @static
      * @param {string|HTMLImageElement|HTMLCanvasElement|SVGElement|HTMLVideoElement} source - The
      *        source to create base texture from.
-     * @param {object} [options] See {@link PIXI.BaseTexture}'s constructor for options.
-     * @param {boolean} [strict] Enforce strict-mode, see {@link PIXI.settings.STRICT_TEXTURE_CACHE}.
+     * @param {object} [options] - See {@link PIXI.BaseTexture}'s constructor for options.
+     * @param {string} [options.pixiIdPrefix=pixiid] - If a source has no id, this is the prefix of the generated id
+     * @param {boolean} [strict] - Enforce strict-mode, see {@link PIXI.settings.STRICT_TEXTURE_CACHE}.
      * @returns {PIXI.BaseTexture} The new base texture.
      */
-    static from(source: ImageSource|string, options: IBaseTextureOptions,
-        strict = settings.STRICT_TEXTURE_CACHE): BaseTexture
+    static from<R extends Resource = Resource, RO = IAutoDetectOptions>(source: ImageSource|string,
+        options?: IBaseTextureOptions<RO>, strict = settings.STRICT_TEXTURE_CACHE): BaseTexture<R>
     {
         const isFrame = typeof source === 'string';
         let cacheId = null;
@@ -617,13 +656,15 @@ export class BaseTexture extends EventEmitter
         {
             if (!(source as any)._pixiId)
             {
-                (source as any)._pixiId = `pixiid_${uid()}`;
+                const prefix = (options && options.pixiIdPrefix) || 'pixiid';
+
+                (source as any)._pixiId = `${prefix}_${uid()}`;
             }
 
             cacheId = (source as any)._pixiId;
         }
 
-        let baseTexture = BaseTextureCache[cacheId];
+        let baseTexture = BaseTextureCache[cacheId] as BaseTexture<R>;
 
         // Strict-mode rejects invalid cacheIds
         if (isFrame && strict && !baseTexture)
@@ -633,7 +674,7 @@ export class BaseTexture extends EventEmitter
 
         if (!baseTexture)
         {
-            baseTexture = new BaseTexture(source, options);
+            baseTexture = new BaseTexture<R>(source, options);
             baseTexture.cacheId = cacheId;
             BaseTexture.addToCache(baseTexture, cacheId);
         }
@@ -645,15 +686,15 @@ export class BaseTexture extends EventEmitter
      * Create a new BaseTexture with a BufferResource from a Float32Array.
      * RGBA values are floats from 0 to 1.
      * @static
-     * @param {Float32Array|Uint8Array} buffer The optional array to use, if no data
+     * @param {Float32Array|Uint8Array} buffer - The optional array to use, if no data
      *        is provided, a new Float32Array is created.
      * @param {number} width - Width of the resource
      * @param {number} height - Height of the resource
-     * @param {object} [options] See {@link PIXI.BaseTexture}'s constructor for options.
+     * @param {object} [options] - See {@link PIXI.BaseTexture}'s constructor for options.
      * @return {PIXI.BaseTexture} The resulting new BaseTexture
      */
     static fromBuffer(buffer: Float32Array|Uint8Array,
-        width: number, height: number, options: IBaseTextureOptions): BaseTexture
+        width: number, height: number, options?: IBaseTextureOptions): BaseTexture<BufferResource>
     {
         buffer = buffer || new Float32Array(width * height * 4);
 

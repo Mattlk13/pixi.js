@@ -9,9 +9,11 @@ import type { RenderTexture } from '../renderTexture/RenderTexture';
 import type { FilterSystem } from './FilterSystem';
 import type { FilterState } from './FilterState';
 import type { BLEND_MODES, CLEAR_MODES } from '@pixi/constants';
+import type { Dict } from '@pixi/utils';
 
 /**
- * Filter is a special type of WebGL shader that is applied to the screen.
+ * A filter is a special shader that applies post-processing effects to an input texture and writes into an output
+ * render-target.
  *
  * {@link http://pixijs.io/examples/#/filters/blur-filter.js Example} of the
  * {@link PIXI.filters.BlurFilter BlurFilter}.
@@ -41,6 +43,41 @@ import type { BLEND_MODES, CLEAR_MODES } from '@pixi/constants';
  *
  * Also be aware that we have changed default vertex shader, please consult
  * {@link https://github.com/pixijs/pixi.js/wiki/v5-Creating-filters Wiki}.
+ *
+ * ### Frames
+ *
+ * The following table summarizes the coordinate spaces used in the filtering pipeline:
+ *
+ * <table>
+ * <thead>
+ *   <tr>
+ *     <th>Coordinate Space</th>
+ *     <th>Description</th>
+ *   </tr>
+ * </thead>
+ * <tbody>
+ *   <tr>
+ *     <td>Texture Coordinates</td>
+ *     <td>
+ *         The texture (or UV) coordinates in the input base-texture's space. These are normalized into the (0,1) range along
+ *         both axes.
+ *     </td>
+ *   </tr>
+ *   <tr>
+ *     <td>World Space</td>
+ *     <td>
+ *         A point in the same space as the world bounds of any display-object (i.e. in the scene graph's space).
+ *     </td>
+ *   </tr>
+ *   <tr>
+ *     <td>Physical Pixels</td>
+ *     <td>
+ *         This is base-texture's space with the origin on the top-left. You can calculate these by multiplying the texture
+ *         coordinates by the dimensions of the texture.
+ *     </td>
+ *   </tr>
+ * </tbody>
+ * </table>
  *
  * ### Built-in Uniforms
  *
@@ -127,7 +164,7 @@ import type { BLEND_MODES, CLEAR_MODES } from '@pixi/constants';
  * `inputClamp.zw` is bottom-right pixel center.
  *
  * ```
- * vec4 color = texture2D(uSampler, clamp(modifigedTextureCoord, inputClamp.xy, inputClamp.zw))
+ * vec4 color = texture2D(uSampler, clamp(modifiedTextureCoord, inputClamp.xy, inputClamp.zw))
  * ```
  * OR
  * ```
@@ -152,6 +189,10 @@ export class Filter extends Shader
     public resolution: number;
     public enabled: boolean;
     public autoFit: boolean;
+    /**
+     * Legacy filters use position and uvs from attributes (set by filter system)
+     * @readonly
+     */
     public legacy: boolean;
     state: State;
     /**
@@ -159,7 +200,7 @@ export class Filter extends Shader
      * @param {string} [fragmentSrc] - The source of the fragment shader.
      * @param {object} [uniforms] - Custom uniforms to use to augment the built-in ones.
      */
-    constructor(vertexSrc?: string, fragmentSrc?: string, uniforms?: {[key: string]: any})
+    constructor(vertexSrc?: string, fragmentSrc?: string, uniforms?: Dict<any>)
     {
         const program = Program.from(vertexSrc || Filter.defaultVertexSrc,
             fragmentSrc || Filter.defaultFragmentSrc);
@@ -199,13 +240,6 @@ export class Filter extends Shader
         this.autoFit = true;
 
         /**
-         * Legacy filters use position and uvs from attributes
-         * @member {boolean}
-         * @readonly
-         */
-        this.legacy = !!this.program.attributeData.aTextureCoord;
-
-        /**
          * The WebGL state the filter requires to render
          * @member {PIXI.State}
          */
@@ -215,16 +249,15 @@ export class Filter extends Shader
     /**
      * Applies the filter
      *
-     * @param {PIXI.systems.FilterSystem} filterManager - The renderer to retrieve the filter from
+     * @param {PIXI.FilterSystem} filterManager - The renderer to retrieve the filter from
      * @param {PIXI.RenderTexture} input - The input render target.
      * @param {PIXI.RenderTexture} output - The target to output to.
-     * @param {PIXI.CLEAR_MODES} clearMode - Should the output be cleared before rendering to it.
+     * @param {PIXI.CLEAR_MODES} [clearMode] - Should the output be cleared before rendering to it.
      * @param {object} [currentState] - It's current state of filter.
      *        There are some useful properties in the currentState :
      *        target, filters, sourceFrame, destinationFrame, renderTarget, resolution
      */
-    apply(filterManager: FilterSystem, input: RenderTexture, output: RenderTexture, clearMode: CLEAR_MODES,
-        /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
+    apply(filterManager: FilterSystem, input: RenderTexture, output: RenderTexture, clearMode?: CLEAR_MODES,
         _currentState?: FilterState): void
     {
         // do as you please!
@@ -245,7 +278,7 @@ export class Filter extends Shader
         return this.state.blendMode;
     }
 
-    set blendMode(value) // eslint-disable-line require-jsdoc
+    set blendMode(value: BLEND_MODES)
     {
         this.state.blendMode = value;
     }
@@ -281,5 +314,5 @@ export class Filter extends Shader
      * @type {object}
      * @protected
      */
-    static SOURCE_KEY_MAP: {[key: string]: string};
+    static SOURCE_KEY_MAP: Dict<string>;
 }

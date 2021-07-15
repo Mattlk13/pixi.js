@@ -1,3 +1,4 @@
+import { BUFFER_TYPE } from '@pixi/constants';
 import { Runner } from '@pixi/runner';
 
 import type { GLBuffer } from './GLBuffer';
@@ -39,16 +40,23 @@ export interface ITypedArray extends IArrayBuffer
 export class Buffer
 {
     public data: ITypedArray;
-    public index: boolean;
+
+    /**
+     * The type of buffer this is, one of:
+     * + ELEMENT_ARRAY_BUFFER - used as an index buffer
+     * + ARRAY_BUFFER - used as an attribute buffer
+     * + UNIFORM_BUFFER - used as a uniform buffer (if available)
+     */
+    public type: BUFFER_TYPE;
     public static: boolean;
     public id: number;
      disposeRunner: Runner;
     _glBuffers: {[key: number]: GLBuffer};
     _updateID: number;
     /**
-     * @param {ArrayBuffer| SharedArrayBuffer|ArrayBufferView} data the data to store in the buffer.
-     * @param {boolean} [_static=true] `true` for static buffer
-     * @param {boolean} [index=false] `true` for index buffer
+     * @param {ArrayBuffer| SharedArrayBuffer|ArrayBufferView} data - the data to store in the buffer.
+     * @param {boolean} [_static=true] - `true` for static buffer
+     * @param {boolean} [index=false] - `true` for index buffer
      */
     constructor(data?: IArrayBuffer, _static = true, index = false)
     {
@@ -81,10 +89,14 @@ export class Buffer
     // TODO could explore flagging only a partial upload?
     /**
      * flags this buffer as requiring an upload to the GPU
-     * @param {ArrayBuffer|SharedArrayBuffer|ArrayBufferView} [data] the data to update in the buffer.
+     * @param {ArrayBuffer|SharedArrayBuffer|ArrayBufferView|number[]} [data] - the data to update in the buffer.
      */
-    update(data?: IArrayBuffer): void
+    update(data?: IArrayBuffer | Array<number>): void
     {
+        if (data instanceof Array)
+        {
+            data = new Float32Array(data);
+        }
         this.data = (data as ITypedArray) || this.data;
         this._updateID++;
     }
@@ -108,10 +120,27 @@ export class Buffer
     }
 
     /**
+     * Flags whether this is an index buffer.
+     *
+     * Index buffers are of type `ELEMENT_ARRAY_BUFFER`. Note that setting this property to false will make
+     * the buffer of type `ARRAY_BUFFER`.
+     *
+     * For backwards compatibility.
+     */
+    set index(value: boolean)
+    {
+        this.type = value ? BUFFER_TYPE.ELEMENT_ARRAY_BUFFER : BUFFER_TYPE.ARRAY_BUFFER;
+    }
+
+    get index(): boolean
+    {
+        return this.type === BUFFER_TYPE.ELEMENT_ARRAY_BUFFER;
+    }
+    /**
      * Helper function that creates a buffer based on an array or TypedArray
      *
      * @static
-     * @param {ArrayBufferView | number[]} data the TypedArray that the buffer will store. If this is a regular Array it will be converted to a Float32Array.
+     * @param {ArrayBufferView | number[]} data - the TypedArray that the buffer will store. If this is a regular Array it will be converted to a Float32Array.
      * @return {PIXI.Buffer} A new Buffer based on the data provided.
      */
     static from(data: IArrayBuffer | number[]): Buffer

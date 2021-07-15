@@ -1,30 +1,39 @@
-import { System } from '../System';
 import { GC_MODES } from '@pixi/constants';
 import { settings } from '@pixi/settings';
 
+import type { ISystem } from '../ISystem';
 import type { Renderer } from '../Renderer';
+import type { Texture } from './Texture';
+import type { RenderTexture } from '../renderTexture/RenderTexture';
+
+export interface IUnloadableTexture {
+    _texture: Texture | RenderTexture;
+    children: IUnloadableTexture[];
+}
 
 /**
  * System plugin to the renderer to manage texture garbage collection on the GPU,
  * ensuring that it does not get clogged up with textures that are no longer being used.
  *
  * @class
- * @memberof PIXI.systems
+ * @memberof PIXI
  * @extends PIXI.System
  */
-export class TextureGCSystem extends System
+export class TextureGCSystem implements ISystem
 {
     public count: number;
     public checkCount: number;
     public maxIdle: number;
     public checkCountMax: number;
-    public mode: number;
+    public mode: GC_MODES;
+    private renderer: Renderer;
+
     /**
      * @param {PIXI.Renderer} renderer - The renderer this System works for.
      */
     constructor(renderer: Renderer)
     {
-        super(renderer);
+        this.renderer = renderer;
 
         /**
          * Count
@@ -55,7 +64,7 @@ export class TextureGCSystem extends System
         this.checkCountMax = settings.GC_MAX_CHECK_COUNT;
 
         /**
-         * Current garabage collection mode
+         * Current garbage collection mode
          * @member {PIXI.GC_MODES}
          * @see PIXI.settings.GC_MODE
          */
@@ -134,19 +143,28 @@ export class TextureGCSystem extends System
      *
      * @param {PIXI.DisplayObject} displayObject - the displayObject to remove the textures from.
      */
-    unload(displayObject: any): void
+    unload(displayObject: IUnloadableTexture): void
     {
         const tm = this.renderer.texture;
+        const texture = displayObject._texture as RenderTexture;
 
         // only destroy non generated textures
-        if (displayObject._texture && displayObject._texture._glRenderTargets)
+        if (texture && !texture.framebuffer)
         {
-            tm.destroyTexture(displayObject._texture);
+            tm.destroyTexture(texture);
         }
 
         for (let i = displayObject.children.length - 1; i >= 0; i--)
         {
             this.unload(displayObject.children[i]);
         }
+    }
+
+    /**
+     * @ignore
+     */
+    destroy(): void
+    {
+        this.renderer = null;
     }
 }

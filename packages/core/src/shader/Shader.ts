@@ -1,6 +1,8 @@
 import { Program } from './Program';
 import { UniformGroup } from './UniformGroup';
 
+import type { Dict } from '@pixi/utils';
+
 /**
  * A helper class for shaders
  *
@@ -11,11 +13,18 @@ export class Shader
 {
     public program: Program;
     public uniformGroup: UniformGroup;
+
+    /**
+     * used internally to bind uniform buffer objects
+     * @ignore
+     */
+    uniformBindCount = 0;
+
     /**
      * @param {PIXI.Program} [program] - The program the shader will use.
      * @param {object} [uniforms] - Custom uniforms to use to augment the built-in ones.
      */
-    constructor(program: Program, uniforms: {[x: string]: any})
+    constructor(program: Program, uniforms?: Dict<any>)
     {
         /**
          * Program that the shader uses
@@ -40,17 +49,6 @@ export class Shader
         else
         {
             this.uniformGroup = new UniformGroup({});
-        }
-
-        // time to build some getters and setters!
-        // I guess down the line this could sort of generate an instruction list rather than use dirty ids?
-        // does the trick for now though!
-        for (const i in program.uniformData)
-        {
-            if (this.uniformGroup.uniforms[i] instanceof Array)
-            {
-                this.uniformGroup.uniforms[i] = new Float32Array(this.uniformGroup.uniforms[i]);
-            }
         }
     }
 
@@ -90,7 +88,7 @@ export class Shader
      * @readonly
      * @member {object}
      */
-    get uniforms(): {[x: string]: any}
+    get uniforms(): Dict<any>
     {
         return this.uniformGroup.uniforms;
     }
@@ -104,7 +102,7 @@ export class Shader
      *
      * @returns {PIXI.Shader} an shiny new Pixi shader!
      */
-    static from(vertexSrc?: string, fragmentSrc?: string, uniforms?: {[x: string]: any}): Shader
+    static from(vertexSrc?: string, fragmentSrc?: string, uniforms?: Dict<any>): Shader
     {
         const program = Program.from(vertexSrc, fragmentSrc);
 

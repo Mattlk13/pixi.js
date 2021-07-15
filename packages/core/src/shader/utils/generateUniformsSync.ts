@@ -1,13 +1,16 @@
 import { uniformParsers } from './uniformParsers';
 
 import type { UniformGroup } from '../UniformGroup';
+import type { Dict } from '@pixi/utils';
+
+export type UniformsSyncCallback = (...args: any[]) => void;
 
 // cv = CachedValue
 // v = value
 // ud = uniformData
 // uv = uniformValue
 // l = location
-const GLSL_TO_SINGLE_SETTERS_CACHED: {[x: string]: string} = {
+const GLSL_TO_SINGLE_SETTERS_CACHED: Dict<string> = {
 
     float: `
     if(cv !== v)
@@ -41,6 +44,11 @@ const GLSL_TO_SINGLE_SETTERS_CACHED: {[x: string]: string} = {
     ivec3:    'gl.uniform3i(location, v[0], v[1], v[2])',
     ivec4:    'gl.uniform4i(location, v[0], v[1], v[2], v[3])',
 
+    uint:     'gl.uniform1ui(location, v)',
+    uvec2:    'gl.uniform2ui(location, v[0], v[1])',
+    uvec3:    'gl.uniform3ui(location, v[0], v[1], v[2])',
+    uvec4:    'gl.uniform4ui(location, v[0], v[1], v[2], v[3])',
+
     bool:     'gl.uniform1i(location, v)',
     bvec2:    'gl.uniform2i(location, v[0], v[1])',
     bvec3:    'gl.uniform3i(location, v[0], v[1], v[2])',
@@ -55,7 +63,7 @@ const GLSL_TO_SINGLE_SETTERS_CACHED: {[x: string]: string} = {
     sampler2DArray: 'gl.uniform1i(location, v)',
 };
 
-const GLSL_TO_ARRAY_SETTERS: {[x: string]: string} = {
+const GLSL_TO_ARRAY_SETTERS: Dict<string> = {
 
     float:    `gl.uniform1fv(location, v)`,
 
@@ -72,6 +80,11 @@ const GLSL_TO_ARRAY_SETTERS: {[x: string]: string} = {
     ivec3:    'gl.uniform3iv(location, v)',
     ivec4:    'gl.uniform4iv(location, v)',
 
+    uint:     'gl.uniform1uiv(location, v)',
+    uvec2:    'gl.uniform2uiv(location, v)',
+    uvec3:    'gl.uniform3uiv(location, v)',
+    uvec4:    'gl.uniform4uiv(location, v)',
+
     bool:     'gl.uniform1iv(location, v)',
     bvec2:    'gl.uniform2iv(location, v)',
     bvec3:    'gl.uniform3iv(location, v)',
@@ -82,7 +95,7 @@ const GLSL_TO_ARRAY_SETTERS: {[x: string]: string} = {
     sampler2DArray: 'gl.uniform1iv(location, v)',
 };
 
-export function generateUniformsSync(group: UniformGroup, uniformData: {[x: string]: any}): Function
+export function generateUniformsSync(group: UniformGroup, uniformData: Dict<any>): UniformsSyncCallback
 {
     const funcFragments = [`
         var v = null;
@@ -99,9 +112,18 @@ export function generateUniformsSync(group: UniformGroup, uniformData: {[x: stri
         {
             if (group.uniforms[i].group)
             {
-                funcFragments.push(`
-                    renderer.shader.syncUniformGroup(uv["${i}"], syncData);
-                `);
+                if (group.uniforms[i].ubo)
+                {
+                    funcFragments.push(`
+                        renderer.shader.syncUniformBufferGroup(uv.${i}, '${i}');
+                    `);
+                }
+                else
+                {
+                    funcFragments.push(`
+                        renderer.shader.syncUniformGroup(uv.${i}, syncData);
+                    `);
+                }
             }
 
             continue;
@@ -135,12 +157,12 @@ export function generateUniformsSync(group: UniformGroup, uniformData: {[x: stri
         }
     }
 
-    /**
+    /*
      * the introduction of syncData is to solve an issue where textures in uniform groups are not set correctly
      * the texture count was always starting from 0 in each group. This needs to increment each time a texture is used
      * no matter which group is being used
      *
      */
-    return new Function('ud', 'uv', 'renderer', 'syncData', funcFragments.join('\n')); // eslint-disable-line no-new-func
+    // eslint-disable-next-line no-new-func
+    return new Function('ud', 'uv', 'renderer', 'syncData', funcFragments.join('\n')) as UniformsSyncCallback;
 }
-

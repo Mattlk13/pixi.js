@@ -2,9 +2,8 @@ import { LoaderResource } from '@pixi/loaders';
 import { autoDetectFormat } from './formats';
 import { BitmapFont } from './BitmapFont';
 
-import type { ILoaderResource } from '@pixi/loaders';
+import type { ILoaderResource, Loader } from '@pixi/loaders';
 import type { Dict } from '@pixi/utils';
-import type { Loader } from '@pixi/loaders';
 import type { Texture } from '@pixi/core';
 
 /**
@@ -23,7 +22,7 @@ export class BitmapFontLoader
      */
     public static add(): void
     {
-        LoaderResource.setExtensionXhrType('fnt', LoaderResource.XHR_RESPONSE_TYPE.DOCUMENT);
+        LoaderResource.setExtensionXhrType('fnt', LoaderResource.XHR_RESPONSE_TYPE.TEXT);
     }
 
     /**
@@ -56,7 +55,7 @@ export class BitmapFontLoader
 
             if (Object.keys(textures).length === data.page.length)
             {
-                resource.bitmapFont = BitmapFont.install(data, textures);
+                resource.bitmapFont = BitmapFont.install(data, textures, true);
                 next();
             }
         };
@@ -152,7 +151,7 @@ export class BitmapFontLoader
     /**
      * Replacement for NodeJS's path.dirname
      * @private
-     * @param {string} url Path to get directory for
+     * @param {string} url - Path to get directory for
      */
     private static dirname(url: string): string
     {

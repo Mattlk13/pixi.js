@@ -1,6 +1,6 @@
 import { Rectangle } from '@pixi/math';
 
-import type { IPoint, Transform, Matrix } from '@pixi/math';
+import type { IPointData, Transform, Matrix } from '@pixi/math';
 
 /**
  * 'Builder' pattern for bounds rectangles.
@@ -87,7 +87,7 @@ export class Bounds
      * @param {PIXI.Rectangle} rect - temporary object will be used if AABB is not empty
      * @returns {PIXI.Rectangle} A rectangle of the bounds
      */
-    getRectangle(rect: Rectangle): Rectangle
+    getRectangle(rect?: Rectangle): Rectangle
     {
         if (this.minX > this.maxX || this.minY > this.maxY)
         {
@@ -107,14 +107,33 @@ export class Bounds
     /**
      * This function should be inlined when its possible.
      *
-     * @param {PIXI.IPoint} point - The point to add.
+     * @param {PIXI.IPointData} point - The point to add.
      */
-    addPoint(point: IPoint): void
+    addPoint(point: IPointData): void
     {
         this.minX = Math.min(this.minX, point.x);
         this.maxX = Math.max(this.maxX, point.x);
         this.minY = Math.min(this.minY, point.y);
         this.maxY = Math.max(this.maxY, point.y);
+    }
+
+    /**
+     * Adds a point, after transformed. This should be inlined when its possible.
+     *
+     * @param matrix
+     * @param point
+     */
+    addPointMatrix(matrix: Matrix, point: IPointData): void
+    {
+        const { a, b, c, d, tx, ty } = matrix;
+
+        const x = (a * point.x) + (c * point.y) + tx;
+        const y = (b * point.x) + (d * point.y) + ty;
+
+        this.minX = Math.min(this.minX, x);
+        this.maxX = Math.max(this.maxX, x);
+        this.minY = Math.min(this.minY, y);
+        this.maxY = Math.max(this.maxY, y);
     }
 
     /**
@@ -372,8 +391,8 @@ export class Bounds
     /**
      * Adds other Bounds, multiplied by matrix. Bounds shouldn't be empty.
      *
-     * @param {PIXI.Bounds} bounds other bounds
-     * @param {PIXI.Matrix} matrix multiplicator
+     * @param {PIXI.Bounds} bounds - other bounds
+     * @param {PIXI.Matrix} matrix - multiplicator
      */
     addBoundsMatrix(bounds: Bounds, matrix: Matrix): void
     {

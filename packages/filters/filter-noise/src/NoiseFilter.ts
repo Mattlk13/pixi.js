@@ -2,16 +2,14 @@ import { Filter, defaultFilterVertex } from '@pixi/core';
 import fragment from './noise.frag';
 
 /**
- * @author Vico @vicocotea
- * original filter: https://github.com/evanw/glfx.js/blob/master/src/filters/adjust/noise.js
- */
-
-/**
  * A Noise effect filter.
+ *
+ * original filter: https://github.com/evanw/glfx.js/blob/master/src/filters/adjust/noise.js
  *
  * @class
  * @extends PIXI.Filter
  * @memberof PIXI.filters
+ * @author Vico @vicocotea
  */
 export class NoiseFilter extends Filter
 {
@@ -41,7 +39,7 @@ export class NoiseFilter extends Filter
         return this.uniforms.uNoise;
     }
 
-    set noise(value) // eslint-disable-line require-jsdoc
+    set noise(value: number)
     {
         this.uniforms.uNoise = value;
     }
@@ -56,7 +54,7 @@ export class NoiseFilter extends Filter
         return this.uniforms.uSeed;
     }
 
-    set seed(value) // eslint-disable-line require-jsdoc
+    set seed(value: number)
     {
         this.uniforms.uSeed = value;
     }

@@ -1,25 +1,25 @@
 import { mapWebGLBlendModesToPixi } from './utils/mapWebGLBlendModesToPixi';
-import { System } from '../System';
 import { State } from './State';
 import { BLEND_MODES } from '@pixi/constants';
 
+import type { ISystem } from '../ISystem';
 import type { IRenderingContext } from '../IRenderingContext';
-import type { Renderer } from '../Renderer';
 
 const BLEND = 0;
 const OFFSET = 1;
 const CULLING = 2;
 const DEPTH_TEST = 3;
 const WINDING = 4;
+const DEPTH_MASK = 5;
 
 /**
  * System plugin to the renderer to manage WebGL state machines.
  *
  * @class
  * @extends PIXI.System
- * @memberof PIXI.systems
+ * @memberof PIXI
  */
-export class StateSystem extends System
+export class StateSystem implements ISystem
 {
     public stateId: number;
     public polygonOffset: number;
@@ -30,13 +30,8 @@ export class StateSystem extends System
     protected readonly map: Array<(value: boolean) => void>;
     protected readonly checks: Array<(system: this, state: State) => void>;
     protected defaultState: State;
-    /**
-     * @param {PIXI.Renderer} renderer - The renderer this System works for.
-     */
-    constructor(renderer: Renderer)
+    constructor()
     {
-        super(renderer);
-
         /**
          * GL context
          * @member {WebGLRenderingContext}
@@ -86,6 +81,7 @@ export class StateSystem extends System
         this.map[CULLING] = this.setCullFace;
         this.map[DEPTH_TEST] = this.setDepthTest;
         this.map[WINDING] = this.setFrontFace;
+        this.map[DEPTH_MASK] = this.setDepthMask;
 
         /**
          * Collection of check calls
@@ -209,6 +205,16 @@ export class StateSystem extends System
     }
 
     /**
+     * Sets whether to enable or disable depth mask.
+     *
+     * @param {boolean} value - Turn on or off webgl depth mask.
+     */
+    setDepthMask(value: boolean): void
+    {
+        this.gl.depthMask(value);
+    }
+
+    /**
      * Sets whether to enable or disable cull face.
      *
      * @param {boolean} value - Turn on or off webgl cull face.
@@ -297,8 +303,8 @@ export class StateSystem extends System
      * or if polygon fill is activated then we need to check if the polygon offset changes.
      * The idea is that we only check what we have too.
      *
-     * @param {Function} func  the checking function to add or remove
-     * @param {boolean} value  should the check function be added or removed.
+     * @param {Function} func - the checking function to add or remove
+     * @param {boolean} value - should the check function be added or removed.
      */
     updateCheck(func: (system: this, state: State) => void, value: boolean): void
     {
@@ -319,8 +325,8 @@ export class StateSystem extends System
      *
      * @static
      * @private
-     * @param {PIXI.StateSystem} System  the System to perform the state check on
-     * @param {PIXI.State} state  the state that the blendMode will pulled from
+     * @param {PIXI.StateSystem} System - the System to perform the state check on
+     * @param {PIXI.State} state - the state that the blendMode will pulled from
      */
     static checkBlendMode(system: StateSystem, state: State): void
     {
@@ -332,11 +338,19 @@ export class StateSystem extends System
      *
      * @static
      * @private
-     * @param {PIXI.StateSystem} System  the System to perform the state check on
-     * @param {PIXI.State} state  the state that the blendMode will pulled from
+     * @param {PIXI.StateSystem} System - the System to perform the state check on
+     * @param {PIXI.State} state - the state that the blendMode will pulled from
      */
     static checkPolygonOffset(system: StateSystem, state: State): void
     {
-        system.setPolygonOffset(state.polygonOffset, 0);
+        system.setPolygonOffset(1, state.polygonOffset);
+    }
+
+    /**
+     * @ignore
+     */
+    destroy(): void
+    {
+        this.gl = null;
     }
 }
